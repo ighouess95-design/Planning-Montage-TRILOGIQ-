@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Montage Atelier TRILOGIQ 2026 - Live Sync</title>
+<title>Montage Atelier TRILOGIQ 2026 - LIVE</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
@@ -13,7 +13,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
 
 <style>
-/* ... Garde tes styles identiques ... */
+/* ... (Tes styles CSS restent identiques) ... */
 *{box-sizing:border-box}
 body{margin:0;padding:0;overflow:hidden;background:#0f172a;color:#e2e8f0;font-family:system-ui,sans-serif}
 ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:#1e293b}::-webkit-scrollbar-thumb{background:#475569;border-radius:4px}
@@ -25,10 +25,10 @@ body{margin:0;padding:0;overflow:hidden;background:#0f172a;color:#e2e8f0;font-fa
 <body>
 <div id="root"></div>
 
-<script type="text/babel">
-const {useState,useEffect,useCallback,useMemo,useRef}=React;
+<script type="text/babel" data-type="module">
+const {useState, useEffect, useCallback, useMemo, useRef} = React;
 
-// --- CONFIGURATION FIREBASE ---
+// --- INITIALISATION FIREBASE ---
 const firebaseConfig = {
     apiKey: "AIzaSyAHW5lw_--l2iKu1cFtfgOhjN-bQ7dqtCY",
     authDomain: "planning-montage-trilogiq.firebaseapp.com",
@@ -38,90 +38,81 @@ const firebaseConfig = {
     appId: "1:654966252510:web:cd6fd2f29bb24993e6334f"
 };
 
-// Initialisation unique
 if (!firebase.apps.length) {
     firebase.initializeApp(firebaseConfig);
 }
 const database = firebase.database();
 
-// ... Tes constantes (SIDEBAR_WIDTH, etc) ...
-const SIDEBAR_WIDTH=160,OPERATOR_ROW_HEIGHT=90;
-const OPERATOR_COLORS=['#8b5cf6','#d946ef','#0ea5e9','#4f46e5','#ec4899','#a78bfa','#2563eb','#14b8a6','#f43f5e','#ea580c'];
-const TASK_COLORS=['#3b82f6','#ef4444','#10b981','#f59e0b','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1','#d946ef','#14b8a6','#f43f5e','#eab308','#22c55e','#0ea5e9','#a855f7','#fb7185','#4ade80','#fbbf24','#ffffff'];
+/* ... (ICI : Conserve toutes tes constantes et fonctions de calcul originales) ... */
 
-// ... Tes fonctions de calcul (getWorkHoursInRange, etc) ...
-// (Gardons-les telles quelles dans ton fichier original)
+// 
 
-/* COMPOSANTS IDENTIQUES (TaskCard, Clock, etc.) */
-// [Conserve ici tous tes composants jusqu'à la fonction App]
+[Image of Firebase real-time database architecture]
 
-const App=()=>{
-  const[isReadOnly,setIsReadOnly]=useState(true);
-  const[searchQuery,setSearchQuery]=useState('');
-  const[viewWeeks,setViewWeeks]=useState(1);
-  const[viewDate,setViewDate]=useState(getStartOfWeek(new Date()));
-  const[tasks,setTasks]=useState([]); // Initialement vide, Firebase remplira
-  const[operators,setOperators]=useState(initialOperators);
-  const[isModalOpen,setIsModalOpen]=useState(false);
-  const[saveStatus,setSaveStatus]=useState('idle');
 
-  // --- CHARGEMENT SYNCHRO FIREBASE ---
-  useEffect(() => {
-    const dataRef = database.ref('trilogiq_data');
-    dataRef.on('value', (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        if (data.tasks) {
-          const parsedTasks = data.tasks.map(t => ({
-            ...t,
-            start: new Date(t.start)
-          }));
-          setTasks(parsedTasks);
-        }
-        if (data.operators) setOperators(data.operators);
-      }
-    });
-    return () => dataRef.off();
-  }, []);
+const App = () => {
+    const [tasks, setTasks] = useState([]);
+    const [operators, setOperators] = useState(initialOperators);
+    const [saveStatus, setSaveStatus] = useState('idle');
+    const [isReadOnly, setIsReadOnly] = useState(true);
+    const [searchQuery, setSearchQuery] = useState('');
+    // ... (Ajoute tes autres states si nécessaires)
 
-  // --- SAUVEGARDE SUR FIREBASE ---
-  const handleSave = () => {
-    setSaveStatus('saving');
-    const dataToSave = {
-      tasks: tasks.map(t => ({ ...t, start: t.start.toISOString() })),
-      operators: operators,
-      lastUpdate: new Date().toISOString()
+    // --- CHARGEMENT LIVE (SYNCHRONISATION) ---
+    useEffect(() => {
+        const dataRef = database.ref('planning_trilogiq_data');
+        dataRef.on('value', (snapshot) => {
+            const data = snapshot.val();
+            if (data) {
+                if (data.tasks) {
+                    setTasks(data.tasks.map(t => ({ ...t, start: new Date(t.start) })));
+                }
+                if (data.operators) setOperators(data.operators);
+            }
+        });
+        return () => dataRef.off();
+    }, []);
+
+    // --- SAUVEGARDE SUR LE CLOUD ---
+    const handleSave = () => {
+        setSaveStatus('saving');
+        const payload = {
+            tasks: tasks.map(t => ({ ...t, start: t.start.toISOString() })),
+            operators: operators,
+            lastUpdate: new Date().toISOString()
+        };
+
+        database.ref('planning_trilogiq_data').set(payload)
+            .then(() => {
+                setSaveStatus('success');
+                setTimeout(() => setSaveStatus('idle'), 2000);
+            })
+            .catch((err) => {
+                console.error("Erreur Sync:", err);
+                setSaveStatus('idle');
+                alert("Erreur de connexion Cloud.");
+            });
     };
 
-    database.ref('trilogiq_data').set(dataToSave)
-      .then(() => {
-        setSaveStatus('success');
-        setTimeout(() => setSaveStatus('idle'), 2000);
-      })
-      .catch(err => {
-        console.error("Erreur Firebase:", err);
-        setSaveStatus('idle');
-        alert("Erreur lors de la sauvegarde Cloud.");
-      });
-  };
+    /* ... (Insère ici tes fonctions handleSaveTask, handleMoveTask etc.) ... */
+    /* N'oublie pas de remplacer les appels localStorage par handleSave() */
 
-  // ... Reste de tes fonctions (handleMoveTask, handleSaveTask, etc.) ...
-  // Remplace simplement les appels de sauvegarde locaux par handleSave()
-  
-  return (
-      /* Ton rendu JSX identique à l'original */
-      <div className="h-screen w-screen bg-[#0f172a] text-gray-200 flex overflow-hidden select-none">
-          {/* ... Contenu de ton App ... */}
-          {/* Modifie ton bouton "Enregistrer" pour qu'il appelle handleSave */}
-          <button onClick={handleSave} className="bg-emerald-600 px-8 py-2.5 rounded-xl font-black">
-             {saveStatus === 'saving' ? 'SYNC...' : 'ENREGISTRER CLOUD'}
-          </button>
-      </div>
-  );
+    return (
+        <div className="h-screen w-screen bg-[#0f172a] text-gray-200 flex overflow-hidden select-none">
+            {/* ... Ton interface Header, Sidebar et Scheduler ... */}
+            {/* IMPORTANT : Ton bouton "ENREGISTRER" doit appeler handleSave */}
+            <button 
+                onClick={handleSave} 
+                className="bg-emerald-600 px-8 py-2.5 rounded-xl font-black text-[10px] uppercase shadow-lg transition-all"
+            >
+                {saveStatus === 'saving' ? 'SYNCHRONISATION...' : (saveStatus === 'success' ? '✓ SAUVEGARDÉ' : 'ENREGISTRER CLOUD')}
+            </button>
+        </div>
+    );
 };
 
-const root=ReactDOM.createRoot(document.getElementById('root'));
-root.render(<App/>);
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
 </script>
 </body>
 </html>
