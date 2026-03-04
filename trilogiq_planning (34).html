@@ -1,0 +1,1167 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Montage Atelier TRILOGIQ 2026</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:0;overflow:hidden;background:#0f172a;color:#e2e8f0;font-family:system-ui,sans-serif}
+::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:#1e293b}::-webkit-scrollbar-thumb{background:#475569;border-radius:4px}
+#ops-list::-webkit-scrollbar{width:4px}
+#ops-list::-webkit-scrollbar-track{background:transparent}
+#ops-list::-webkit-scrollbar-thumb{background:#6366f1;border-radius:99px}
+#ops-list::-webkit-scrollbar-thumb:hover{background:#818cf8}
+.scrollbar-hide::-webkit-scrollbar{display:none}.scrollbar-hide{-ms-overflow-style:none;scrollbar-width:none}
+@keyframes search-flash{0%,100%{border:2px solid rgba(251,191,36,.4);box-shadow:0 0 10px rgba(251,191,36,.2)}50%{border:2px solid rgba(251,191,36,1);box-shadow:0 0 35px rgba(251,191,36,.9);transform:scale(1.03)}}
+.search-match-flash{animation:search-flash 1s infinite ease-in-out;z-index:100!important}
+@keyframes bounce{0%,100%{transform:translateY(-10%)}50%{transform:none}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+@keyframes ping{75%,100%{transform:scale(2);opacity:0}}
+.animate-bounce{animation:bounce 1s infinite}.animate-pulse{animation:pulse 2s cubic-bezier(.4,0,.6,1) infinite}.animate-ping{animation:ping 1s cubic-bezier(0,0,.2,1) infinite}
+.task-card{transition:all .15s ease;cursor:pointer}.task-card:hover{filter:brightness(1.08)}
+.grid-line-v{position:absolute;top:0;bottom:0;width:1px;background:rgba(51,65,85,.5);pointer-events:none;z-index:1}
+.grid-line-h{position:absolute;left:0;right:0;height:1px;background:rgba(51,65,85,.4);pointer-events:none;z-index:1}
+input[type="date"]::-webkit-calendar-picker-indicator,input[type="time"]::-webkit-calendar-picker-indicator,input[type="datetime-local"]::-webkit-calendar-picker-indicator{filter:invert(.8);cursor:pointer}
+select option{background:#1e293b;color:white}
+.in-progress-glow{box-shadow:0 0 0 2px white,0 0 20px rgba(255,255,255,.2)}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useCallback,useMemo,useRef}=React;
+
+const SIDEBAR_WIDTH=160,OPERATOR_ROW_HEIGHT=90;
+const OPERATOR_COLORS=['#8b5cf6','#d946ef','#0ea5e9','#4f46e5','#ec4899','#a78bfa','#2563eb','#14b8a6','#f43f5e','#ea580c'];
+const TASK_COLORS=['#3b82f6','#ef4444','#10b981','#f59e0b','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1','#d946ef','#14b8a6','#f43f5e','#eab308','#22c55e','#0ea5e9','#a855f7','#fb7185','#4ade80','#fbbf24','#ffffff'];
+const MONTHS=["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
+const initialOperators=[
+  {id:'1',name:'FRANCOIS',role:'Monteur',color:'#8b5cf6'},{id:'2',name:'KAMEL',role:'Monteur',color:'#d946ef'},
+  {id:'3',name:'KALLO',role:'Monteur',color:'#0ea5e9'},{id:'4',name:'MANU',role:'Monteur',color:'#4f46e5'},
+  {id:'5',name:'MOMO Z',role:'Monteur',color:'#ec4899'},{id:'6',name:'CHRISTIAN',role:'Monteur',color:'#a78bfa'},
+  {id:'7',name:'SOFIANE',role:'Monteur',color:'#2563eb'},{id:'8',name:'GIBRIL',role:'Monteur',color:'#14b8a6'},
+  {id:'9',name:'SORIBA',role:'Monteur',color:'#f43f5e'},{id:'10',name:'MEHREZ',role:'Monteur',color:'#ea580c'},
+];
+
+const getOperatorColor=(name,fixedColor)=>{if(fixedColor)return fixedColor;let h=0;for(let i=0;i<name.length;i++){h=((h<<5)-h)+name.charCodeAt(i);h=h&h;}return OPERATOR_COLORS[Math.abs(h%OPERATOR_COLORS.length)];};
+const getContrastColor=(hex)=>{if(!hex||!hex.startsWith('#'))return'#ffffff';const r=parseInt(hex.substr(1,2),16),g=parseInt(hex.substr(3,2),16),b=parseInt(hex.substr(5,2),16);if(isNaN(r))return'#ffffff';return((r*299+g*587+b*114)/1000)>=128?'#0f172a':'#ffffff';};
+
+const getWeekNumber=(d)=>{const dt=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));const day=dt.getUTCDay()||7;dt.setUTCDate(dt.getUTCDate()+4-day);const ys=new Date(Date.UTC(dt.getUTCFullYear(),0,1));return Math.ceil((((dt-ys)/86400000)+1)/7);};
+const getWorkHoursForDay=(d)=>{const day=d.getDay();if(day===0||day===6)return 0;if(day===3)return 7.5;if(day===5)return 3.5;return 8;};
+const getWorkStartHour=(d)=>d.getDay()===5?{hour:8,minute:30}:{hour:8,minute:0};
+const getWorkEndHour=(d)=>{const day=d.getDay();if(day===3)return{hour:16,minute:30};if(day===5)return{hour:12,minute:0};return{hour:17,minute:0};};
+const getWorkHoursSinceStart=(d)=>{const day=d.getDay(),t=d.getHours()+d.getMinutes()/60;if(day===0||day===6)return 0;if(day===5){if(t<=8.5)return 0;return Math.min(3.5,t-8.5);}if(t<=8)return 0;if(t<=12)return t-8;if(t<=13)return 4;const e=getWorkEndHour(d);return 4+Math.max(0,Math.min(t,e.hour+e.minute/60)-13);};
+const getClockTimeFromWorkHours=(d,wh)=>{const f=new Date(d);if(d.getDay()===5){const h=8.5+wh;f.setHours(Math.floor(h),Math.round((h%1)*60),0,0);return f;}if(wh<=4){const h=8+wh;f.setHours(Math.floor(h),Math.round((h%1)*60),0,0);}else{const h=13+(wh-4);f.setHours(Math.floor(h),Math.round((h%1)*60),0,0);}return f;};
+const getWorkHoursInRange=(s,e)=>{const st=s.getTime(),et=e.getTime();if(et<=st)return 0;const day=s.getDay();if(day===0||day===6)return 0;if(day===5){const ws=new Date(s);ws.setHours(8,30,0,0);const we=new Date(s);we.setHours(12,0,0,0);return Math.max(0,(Math.min(et,we.getTime())-Math.max(st,ws.getTime()))/36e5);}const ws=new Date(s);ws.setHours(8,0,0,0);const wec=getWorkEndHour(s);const le=new Date(s);le.setHours(wec.hour,wec.minute,0,0);const ls=new Date(s);ls.setHours(12,0,0,0);const lend=new Date(s);lend.setHours(13,0,0,0);const as=Math.max(st,ws.getTime()),ae=Math.min(et,le.getTime());if(ae<=as)return 0;let dur=ae-as;if(as<ls.getTime()&&ae>lend.getTime())dur-=36e5;else if(as>=ls.getTime()&&as<lend.getTime())dur=Math.max(0,ae-lend.getTime());else if(ae>ls.getTime()&&ae<=lend.getTime())dur=Math.max(0,ls.getTime()-as);return Math.max(0,dur/36e5);};
+const calculateTaskEnd=(task)=>{let cm=new Date(task.start);const eff=(task.status==='completed'&&task.realDuration!=null)?task.realDuration:task.duration;let left=Math.max(0.01,eff);let s=0;while(left>0.0001&&s<500){s++;const cap=getWorkHoursForDay(cm);if(cap===0){cm.setDate(cm.getDate()+1);const ns=getWorkStartHour(cm);cm.setHours(ns.hour,ns.minute,0,0);continue;}const wec=getWorkEndHour(cm);const eot=new Date(cm);eot.setHours(wec.hour,wec.minute,0,0);const avail=getWorkHoursInRange(cm,eot);if(left<=avail+0.0001){const awt=getWorkHoursSinceStart(cm);cm=getClockTimeFromWorkHours(cm,awt+left);left=0;}else{left-=avail;cm.setDate(cm.getDate()+1);const ns=getWorkStartHour(cm);cm.setHours(ns.hour,ns.minute,0,0);}}return cm;};
+const calculateTaskStart=(end,dur)=>{let cm=new Date(end);let left=Math.max(0.01,dur);let s=0;while(left>0.0001&&s<500){s++;const cap=getWorkHoursForDay(cm);if(cap===0){cm.setDate(cm.getDate()-1);const we=getWorkEndHour(cm);cm.setHours(we.hour,we.minute,0,0);continue;}const wsc=getWorkStartHour(cm);const sot=new Date(cm);sot.setHours(wsc.hour,wsc.minute,0,0);const avail=getWorkHoursInRange(sot,cm);if(left<=avail+0.0001){const awt=getWorkHoursSinceStart(cm);cm=getClockTimeFromWorkHours(cm,Math.max(0,awt-left));left=0;}else{left-=avail;cm.setDate(cm.getDate()-1);const we=getWorkEndHour(cm);cm.setHours(we.hour,we.minute,0,0);}}return cm;};
+const getStartOfWeek=(d)=>{const dt=new Date(d);const day=dt.getDay();const diff=dt.getDate()-day+(day===0?-6:1);dt.setHours(0,0,0,0);return new Date(dt.setDate(diff));};
+const addDays=(d,n)=>{const dt=new Date(d.valueOf());dt.setDate(dt.getDate()+n);return dt;};
+const getDayName=(d)=>d.toLocaleDateString('fr-FR',{weekday:'long'});
+const getDayOfMonth=(d)=>d.getDate();
+const getOperatorDuration=(task,opId)=>{if(task.client==='CONGES')return task.duration;let ms=0,mc=0;task.operatorIds.forEach(id=>{const dv=task.operatorDurations?task.operatorDurations[id]:undefined;if(dv!=null&&!isNaN(dv)){ms+=dv;mc++;}});const my=task.operatorDurations?task.operatorDurations[opId]:undefined;if(my!=null&&!isNaN(my))return my;const auto=task.operatorIds.length-mc;if(auto<=0)return 0;return Math.max(0,task.duration-ms)/auto;};
+
+const AppIcon=({className=''})=><svg xmlns="http://www.w3.org/2000/svg" className={`h-8 w-8 text-blue-400 ${className}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>;
+const PlusIcon=({className=''})=><svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/></svg>;
+const TrashIcon=({className=''})=><svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>;
+const XIcon=({className=''})=><svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>;
+const CheckCircleIcon=({className=''})=><svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 ${className}`} viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"/></svg>;
+const SaveIcon=({className=''})=><svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 ${className}`} viewBox="0 0 20 20" fill="currentColor"><path d="M5 4a2 2 0 012-2h6a2 2 0 012 2v2a2 2 0 01-2 2H7a2 2 0 01-2-2V4zm3 0a1 1 0 00-1 1v1a1 1 0 102 0V5a1 1 0 00-1-1zM5.5 11.5A1.5 1.5 0 017 10h6a1.5 1.5 0 011.5 1.5v3A1.5 1.5 0 0113 16H7a1.5 1.5 0 01-1.5-1.5v-3z"/></svg>;
+const ChevronLeftIcon=({className=''})=><svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7"/></svg>;
+const ChevronRightIcon=({className=''})=><svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg>;
+const SearchIcon=({className=''})=><svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>;
+const BellIcon=({className=''})=><svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>;
+const FireIcon=({className=''})=><svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 ${className}`} viewBox="0 0 24 24" fill="currentColor"><path d="M12 1.5C12 1.5 13.5 5 11.5 7.5C9.5 10 7.5 9 7.5 9S8 12.5 10 14C11.5 15 11 17 11 17C11 17 9 15 7.5 15.5C6 16 6 17.5 6 17.5C6 17.5 5 15 7 13C8 12 8 10.5 8 10.5C8 10.5 6 12 5 12C4 12 3.5 11 3.5 11C3.5 11 6 9 8 8.5C10 8 11 7 11 7C11 7 10 9 11.5 9.5C13 10 14 9 14 9V4C14 4 12.5 7 14.5 8C16.5 9 17 8 17 8V3C17 3 15.5 4.5 14.5 5.5C13.5 6.5 13.5 7 13.5 7L12 1.5Z"/></svg>;
+const MoveIcon=({className=''})=><svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 9l-3 3m0 0l3 3M2 12h13M9 5l3-3m0 0l3 3M12 2v13m0 4l-3 3m0 0l3 3M12 22v-7m4-3l3-3m0 0l-3-3M22 12H9"/></svg>;
+const ExclamationTriangleIcon=({className=''})=><svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>;
+const ChartBarIcon=({className=''})=><svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>;
+const ClockIcon=({className=''})=><svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>;
+const UndoIcon=({className=''})=><svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>;
+const ChatBotIcon=({className=''})=><svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>;
+const SendIcon=({className=''})=><svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>;
+const SparklesIcon=({className=''})=><svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg>;
+const MicrophoneIcon=({className=''})=><svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>;
+const DraftingIcon=({className=''})=><svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>;
+const MenuIcon=({className=''})=><svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 6h16M4 12h16M4 18h16"/></svg>;
+
+const Clock=()=>{
+  const[now,setNow]=useState(new Date());
+  useEffect(()=>{const t=setInterval(()=>setNow(new Date()),1000);return()=>clearInterval(t);},[]);
+  const ft=new Intl.DateTimeFormat('fr-FR',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).format(now);
+  return(
+    <div style={{textAlign:'right'}}>
+      <div style={{fontSize:'20px',fontWeight:900,color:'white',letterSpacing:'-0.02em',fontVariantNumeric:'tabular-nums'}}>{ft}</div>
+      <div style={{fontSize:'9px',fontWeight:700,color:'#475569',textTransform:'uppercase',letterSpacing:'0.1em'}}>{now.toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'})}</div>
+    </div>
+  );
+};
+
+const NotificationBell=({tasks})=>{
+  const[isOpen,setIsOpen]=useState(false);
+  const ref=useRef(null);
+  const alerts=useMemo(()=>{
+    const today=new Date();today.setHours(0,0,0,0);
+    const t3=new Date(today);t3.setDate(today.getDate()+3);
+    const out=[];
+    tasks.forEach(task=>{
+      if(task.status==='completed')return;
+      (task.horsCatalogue||[]).forEach(item=>{out.push({type:item.received?'hc_received':'hc_risk',task,itemName:item.name,isReceived:item.received,receptionDate:item.receptionDate});});
+      if(task.shippingDate){const sd=new Date(task.shippingDate);sd.setHours(0,0,0,0);if(sd>=today&&sd<=t3)out.push({type:'shipping_soon',task,date:sd});}
+    });
+    return out.sort((a,b)=>(a.type==='hc_risk'?-1:1));
+  },[tasks]);
+  useEffect(()=>{
+    if(!isOpen)return;
+    const h=(e)=>{if(ref.current&&!ref.current.contains(e.target))setIsOpen(false);};
+    const k=(e)=>{if(e.key==='Escape')setIsOpen(false);};
+    document.addEventListener('mousedown',h);document.addEventListener('keydown',k);
+    return()=>{document.removeEventListener('mousedown',h);document.removeEventListener('keydown',k);};
+  },[isOpen]);
+  const risk=alerts.filter(a=>a.type==='hc_risk').length;
+  const total=alerts.length;
+  return(<div className="relative" ref={ref}>
+    <button onClick={()=>setIsOpen(p=>!p)} className={`relative p-3 rounded-2xl transition-all group flex items-center justify-center ${risk>0?'bg-red-500/10 border border-red-500/30':'text-gray-400 hover:text-white hover:bg-slate-800'}`}>
+      {risk>0&&<span className="absolute inset-0 rounded-2xl bg-red-500 animate-ping opacity-20 pointer-events-none"></span>}
+      <BellIcon className={`transition-all h-6 w-6 z-10 ${risk>0?'text-red-500 animate-bounce':'text-gray-400 group-hover:text-white'}`}/>
+      {total>0&&<span className={`absolute -top-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-black text-white ring-4 ring-[#0f172a] z-20 ${risk>0?'bg-red-600':'bg-emerald-600'}`}>{total}</span>}
+    </button>
+    {isOpen&&(<div className="absolute right-0 mt-4 w-96 rounded-3xl bg-[#1e293b] shadow-2xl border border-slate-700 z-[2000] overflow-hidden">
+      <div className="px-8 py-5 border-b border-slate-800 flex justify-between items-center">
+        <span className="text-xl font-black text-white flex items-center gap-3"><span className={`w-1.5 h-6 rounded-full ${risk>0?'bg-red-600':'bg-emerald-600'}`}></span>Notifications</span>
+        <span className={`text-white py-1 px-4 rounded-full text-xs font-black ${risk>0?'bg-red-600':'bg-emerald-600'}`}>{total} ALERTE{total>1?'S':''}</span>
+      </div>
+      <div className="max-h-96 overflow-y-auto divide-y divide-slate-800">
+        {total===0?(<div className="px-8 py-12 text-center"><BellIcon className="h-8 w-8 text-slate-600 mx-auto mb-4"/><p className="text-slate-500 font-bold italic">Aucune alerte.</p></div>)
+        :alerts.map((alert,i)=>(<div key={i} className={`px-8 py-5 hover:bg-slate-800/50 transition-all ${alert.type==='hc_received'?'bg-emerald-500/5':''}`}>
+          {alert.type==='shipping_soon'?(<><p className="text-[11px] font-black text-blue-400 uppercase tracking-widest mb-1">🚚 Expédition imminente</p><p className="text-sm font-black text-white">{alert.task.client} — CMD {alert.task.orderNumber}</p><p className="text-[10px] text-slate-500 mt-1">Le {alert.date?alert.date.toLocaleDateString('fr-FR'):'?'}</p></>)
+          :(<><p className={`text-[11px] font-black uppercase tracking-widest mb-1 ${alert.type==='hc_risk'?'text-red-400':'text-emerald-400'}`}>{alert.type==='hc_risk'?'⚠️ Pièce HC manquante':'✅ Pièce HC reçue'}</p><p className="text-sm font-black text-white">{alert.itemName}</p><p className="text-[10px] text-slate-500 mt-1">{alert.task.client} — CMD {alert.task.orderNumber}</p>{alert.receptionDate&&<p className="text-[10px] mt-1 flex items-center gap-1"><ClockIcon className={`h-3 w-3 ${alert.type==='hc_risk'?'text-amber-500':'text-emerald-500'}`}/><span className={alert.type==='hc_risk'?'text-amber-400 font-black':'text-emerald-400 font-black'}>Réception prévue : {new Date(alert.receptionDate).toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'numeric'})}</span></p>}</>)}
+        </div>))}
+      </div>
+    </div>)}
+  </div>);
+};
+
+const TaskCard=({task,onClick,onMoveClick,onDelete,style,searchQuery,isFirstSegment,segmentHours})=>{
+  const[isConfirming,setIsConfirming]=useState(false);
+  const[hcTooltip,setHcTooltip]=useState(null);
+  const[descTooltip,setDescTooltip]=useState(null);
+  useEffect(()=>{if(isConfirming){const t=setTimeout(()=>setIsConfirming(false),3000);return()=>clearTimeout(t);}},[isConfirming]);
+  const isConges=task.client==='CONGES';
+  const isCompleted=task.status==='completed',isInProgress=task.status==='in_progress';
+  const isSearchActive=searchQuery&&searchQuery.length>=2;
+  const isMatch=useMemo(()=>{if(!isSearchActive)return true;const q=searchQuery.trim().toLowerCase();return task.client.toLowerCase().includes(q)||(task.orderNumber||'').toString().toLowerCase().includes(q);},[isSearchActive,searchQuery,task]);
+  const finalColor=isCompleted?'#475569':task.color;
+  const textColor=getContrastColor(finalColor);
+  if(isConges)return(<div className={`task-card absolute flex items-center justify-center overflow-hidden border border-gray-300 ${isSearchActive&&!isMatch?'opacity-5 grayscale':''}`} style={{...style,backgroundColor:'#ffffff',color:'#1e293b',borderRadius:'12px'}} onClick={onClick}><span className="text-[10px] font-black uppercase opacity-60 tracking-[0.4em] px-1 truncate">CONGÉS</span></div>);
+  return(<>
+    {/* Tooltip HC - rendu en dehors de la carte via portal simulé */}
+    {hcTooltip&&(
+      <div style={{position:'fixed',top:hcTooltip.y,left:hcTooltip.x,zIndex:999999,width:'280px',backgroundColor:'#020617',border:'1px solid #ef4444',borderRadius:'16px',padding:'14px',boxShadow:'0 25px 60px rgba(0,0,0,.9)',pointerEvents:'none'}} onMouseLeave={()=>setHcTooltip(null)}>
+        <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'10px',paddingBottom:'8px',borderBottom:'1px solid #1e293b'}}>
+          <ExclamationTriangleIcon className="h-4 w-4 text-amber-500"/>
+          <span style={{fontSize:'10px',fontWeight:900,color:'#f59e0b',textTransform:'uppercase',letterSpacing:'0.15em'}}>⚠️ Suivi Pièces HC</span>
+        </div>
+        <div style={{display:'flex',flexDirection:'column',gap:'8px'}}>
+          {(task.horsCatalogue||[]).map(item=>(<div key={item.id} style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',paddingBottom:'8px',borderBottom:'1px solid #0f172a'}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:'11px',fontWeight:900,textTransform:'uppercase',color:item.received?'#34d399':'#f87171',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{item.name||'PIÈCE HC'}</div>
+              {item.receptionDate&&<div style={{fontSize:'10px',color:'#64748b',marginTop:'3px'}}>📅 Prévu : {new Date(item.receptionDate).toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'numeric'})}</div>}
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:'4px',flexShrink:0,marginLeft:'8px'}}>
+              {item.received?<><span style={{fontSize:'8px',fontWeight:900,color:'#34d399',backgroundColor:'rgba(52,211,153,.1)',padding:'2px 6px',borderRadius:'6px',border:'1px solid rgba(52,211,153,.3)'}}>REÇUE ✓</span></>
+              :<span style={{fontSize:'8px',fontWeight:900,color:'#f87171',backgroundColor:'rgba(248,113,113,.1)',padding:'2px 6px',borderRadius:'6px',border:'1px solid rgba(248,113,113,.3)'}}>ATTENTE</span>}
+            </div>
+          </div>))}
+        </div>
+      </div>
+    )}
+    {/* Tooltip commentaire */}
+    {descTooltip&&(
+      <div style={{position:'fixed',top:descTooltip.y,left:descTooltip.x,zIndex:999999,width:'280px',backgroundColor:'#020617',border:'1px solid rgba(59,130,246,.5)',borderRadius:'16px',padding:'14px',boxShadow:'0 25px 60px rgba(0,0,0,.9)',pointerEvents:'none'}}>
+        <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'8px',paddingBottom:'8px',borderBottom:'1px solid #1e293b'}}>
+          <div style={{width:'4px',height:'14px',backgroundColor:'#3b82f6',borderRadius:'2px'}}/>
+          <span style={{fontSize:'9px',fontWeight:900,color:'#60a5fa',textTransform:'uppercase',letterSpacing:'0.15em'}}>💬 Commentaire montage</span>
+        </div>
+        <p style={{fontSize:'12px',fontWeight:600,color:'white',lineHeight:1.5,fontStyle:'italic'}}>"{task.description}"</p>
+      </div>
+    )}
+    <div className={`task-card absolute flex flex-col p-2.5 shadow-2xl border group ${isSearchActive&&isMatch?'search-match-flash':''} ${isSearchActive&&!isMatch?'opacity-10 grayscale':''} ${isCompleted?'opacity-70':''} ${isInProgress?'in-progress-glow':''}`}
+      style={{...style,backgroundColor:finalColor,color:textColor,borderRadius:'16px',borderColor:isInProgress?'#fff':task.priority==='Urgent'?'#facc15':'rgba(255,255,255,0.12)',borderWidth:isInProgress?'2px':'1px',zIndex:isInProgress?30:10}}
+      onClick={onClick}>
+      <div className="flex flex-col h-full w-full relative min-w-0">
+        <div className="flex flex-col min-w-0 z-10 leading-none relative">
+          <div className="flex justify-between items-start"
+            onMouseEnter={task.description&&task.description.trim()!==''&&isFirstSegment?(e)=>{const r=e.currentTarget.getBoundingClientRect();setDescTooltip({x:r.left,y:r.top-10});}:undefined}
+            onMouseLeave={()=>setDescTooltip(null)}>
+            <span className="font-black text-[18px] tracking-tight drop-shadow-md whitespace-nowrap overflow-visible">{task.orderNumber||'SANS N°'}</span>
+            {isFirstSegment&&task.priority==='Urgent'&&!isCompleted&&<FireIcon className="h-4 w-4 text-amber-400 shrink-0 ml-1"/>}
+            {isFirstSegment&&isCompleted&&<CheckCircleIcon className="h-4 w-4 text-emerald-400 shrink-0 ml-1"/>}
+          </div>
+          <span className="font-black uppercase text-[11px] opacity-90 tracking-tight leading-none mt-1.5 truncate">{task.client}</span>
+        </div>
+        <div className="mt-auto flex justify-between items-end z-10 min-w-0">
+          <div className="flex items-center gap-1.5 min-w-0 flex-shrink overflow-hidden">
+            <div className={`bg-slate-950/90 border border-white/20 px-2 py-0.5 rounded-lg font-black text-[10px] shadow-xl flex items-center gap-0.5 flex-shrink-0 ${isCompleted?'text-slate-400':'text-emerald-400'}`}>
+              {segmentHours?segmentHours.toFixed(1):'?'}<span className="text-[8px] opacity-90">H</span>
+              {isFirstSegment&&<span className="text-[9px] text-white font-black ml-1.5">({isCompleted&&task.realDuration?task.realDuration:task.duration}H)</span>}
+            </div>
+            {isFirstSegment&&onMoveClick&&!isCompleted&&(
+              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all flex-shrink-0">
+                {!isConfirming&&<button type="button" onClick={(e)=>{e.stopPropagation();onMoveClick();}} className="p-1 bg-slate-950/90 border border-white/30 hover:bg-blue-600 rounded-lg text-white shadow-xl transition-all" title="Déplacer"><MoveIcon className="h-3.5 w-3.5"/></button>}
+                {isConfirming?(<button type="button" onClick={(e)=>{e.stopPropagation();onDelete();setIsConfirming(false);}} className="px-2 py-1 bg-red-600 text-white text-[9px] font-black rounded-lg animate-pulse">SUP?</button>)
+                :(<button type="button" onClick={(e)=>{e.stopPropagation();setIsConfirming(true);}} className="p-1 bg-slate-950/90 border border-white/30 hover:bg-red-600 rounded-lg text-white shadow-xl transition-all" title="Supprimer"><TrashIcon className="h-3.5 w-3.5"/></button>)}
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-1 flex-shrink-0 ml-1">
+            {isFirstSegment&&!isCompleted&&(task.horsCatalogue||[]).length>0&&(
+              <div className={`p-1 rounded-md border shadow-md cursor-default ${(task.horsCatalogue||[]).some(i=>!i.received)?'bg-red-600 border-red-400':'bg-emerald-600 border-emerald-400'}`}
+                onMouseEnter={(e)=>{e.stopPropagation();const r=e.currentTarget.getBoundingClientRect();const tx=Math.min(r.left,window.innerWidth-300);const ty=r.bottom+8;setHcTooltip({x:tx,y:ty});}}
+                onMouseLeave={()=>setHcTooltip(null)}>
+                {(task.horsCatalogue||[]).some(i=>!i.received)?<ExclamationTriangleIcon className="h-3 w-3 text-white"/>:<CheckCircleIcon className="h-3 w-3 text-white"/>}
+              </div>
+            )}
+            {isFirstSegment&&task.furnitureCount>0&&<div className="bg-slate-950/95 border border-white/30 px-1.5 py-0.5 rounded-md font-black text-[9px] text-white flex-shrink-0">#{task.furnitureCount}</div>}
+          </div>
+        </div>
+      </div>
+    </div>
+  </>);
+};
+
+const EditableSelect=({label,value,onChange,options,onOptionsChange})=>{
+  const[isAdding,setIsAdding]=useState(false);const[newItem,setNewItem]=useState('');
+  const handleAdd=()=>{if(newItem.trim()&&!options.includes(newItem.trim().toUpperCase())){onOptionsChange([...options,newItem.trim().toUpperCase()]);setNewItem('');setIsAdding(false);}};
+  return(<div className="space-y-2">
+    <div className="flex justify-between items-center">
+      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">{label}</label>
+      <button type="button" onClick={()=>setIsAdding(!isAdding)} className="text-[9px] font-black text-blue-500 uppercase">{isAdding?'Annuler':'+ Liste'}</button>
+    </div>
+    {isAdding?(<div className="flex gap-2"><input autoFocus value={newItem} onChange={e=>setNewItem(e.target.value)} className="flex-1 bg-[#161d2b] border border-blue-500 rounded-2xl p-3 text-white text-xs font-bold outline-none uppercase" placeholder="NOUVEAU NOM..." onKeyDown={e=>e.key==='Enter'&&(e.preventDefault(),handleAdd())}/><button type="button" onClick={handleAdd} className="px-4 bg-blue-600 text-white rounded-xl font-bold text-xs">OK</button></div>)
+    :(<select value={value} onChange={e=>onChange(e.target.value)} className="w-full bg-[#161d2b] border border-white/5 rounded-2xl p-5 text-white font-bold outline-none appearance-none uppercase"><option value="">SÉLECTIONNER...</option>{options.map(opt=><option key={opt} value={opt}>{opt}</option>)}</select>)}
+  </div>);
+};
+
+const TaskModal=({isOpen,onClose,onSaveTask,operators,tasks,taskToEdit,designers,setDesigners,salespeople,setSalespeople})=>{
+  const[client,setClient]=useState('');const[orderNumber,setOrderNumber]=useState('');const[duration,setDuration]=useState('');const[realDuration,setRealDuration]=useState(undefined);
+  const[furnitureCount,setFurnitureCount]=useState('');const[startDate,setStartDate]=useState(new Date().toISOString().split('T')[0]);const[startTime,setStartTime]=useState('08:00');
+  const[selectedOpIds,setSelectedOpIds]=useState([]);const[opStarts,setOpStarts]=useState({});const[opDurations,setOpDurations]=useState({});
+  const[priority,setPriority]=useState('Normal');const[status,setStatus]=useState('planned');const[taskColor,setTaskColor]=useState(TASK_COLORS[0]);
+  const[description,setDescription]=useState('');const[shippingDate,setShippingDate]=useState('');const[hcItems,setHcItems]=useState([]);
+  const[receptionDate,setReceptionDate]=useState('');const[transmissionDateToBE,setTransmissionDateToBE]=useState('');const[designer,setDesigner]=useState('');
+  const[deadlineBE,setDeadlineBE]=useState('');const[returnDateBE,setReturnDateBE]=useState('');const[salesperson,setSalesperson]=useState('');
+  const[amount,setAmount]=useState('');const[transportCost,setTransportCost]=useState('');
+  const[isManutan,setIsManutan]=useState(false);const[isPlaque,setIsPlaque]=useState(false);const[isTube,setIsTube]=useState(false);const[isHoshin,setIsHoshin]=useState(false);const[isReservation,setIsReservation]=useState(false);
+
+  useEffect(()=>{
+    if(taskToEdit){
+      setClient(taskToEdit.client.toUpperCase());setOrderNumber(taskToEdit.orderNumber||'');setDuration(taskToEdit.duration);setRealDuration(taskToEdit.realDuration);setFurnitureCount(taskToEdit.furnitureCount||'');
+      const sd=new Date(taskToEdit.start);setStartDate(sd.toISOString().split('T')[0]);setStartTime(sd.getHours().toString().padStart(2,'0')+':'+sd.getMinutes().toString().padStart(2,'0'));
+      setSelectedOpIds(taskToEdit.operatorIds||[]);setOpStarts(taskToEdit.operatorStarts||{});setOpDurations(taskToEdit.operatorDurations||{});
+      setPriority(taskToEdit.priority||'Normal');setStatus(taskToEdit.status||'planned');setTaskColor(taskToEdit.color||TASK_COLORS[0]);
+      setDescription(taskToEdit.description||'');setShippingDate(taskToEdit.shippingDate||'');setHcItems(taskToEdit.horsCatalogue||[]);
+      setReceptionDate(taskToEdit.receptionDate||'');setTransmissionDateToBE(taskToEdit.transmissionDateToBE||'');setDesigner(taskToEdit.designer||'');
+      setDeadlineBE(taskToEdit.deadlineBE||'');setReturnDateBE(taskToEdit.returnDateBE||'');setSalesperson(taskToEdit.salesperson||'');
+      setAmount(taskToEdit.amount||'');setTransportCost(taskToEdit.transportCost||'');
+      setIsManutan(!!taskToEdit.isManutan);setIsPlaque(!!taskToEdit.isPlaque);setIsTube(!!taskToEdit.isTubeCutting);setIsHoshin(!!taskToEdit.isHoshin);setIsReservation(!!taskToEdit.isReservation);
+    }else{
+      setClient('');setOrderNumber('');setDuration('');setRealDuration(undefined);setFurnitureCount('');
+      setStartDate(new Date().toISOString().split('T')[0]);setStartTime('08:00');
+      setSelectedOpIds([]);setOpStarts({});setOpDurations({});setPriority('Normal');setStatus('planned');
+      setTaskColor(TASK_COLORS[Math.floor(Math.random()*(TASK_COLORS.length-1))]);
+      setDescription('');setShippingDate('');setHcItems([]);setReceptionDate('');setTransmissionDateToBE('');setDesigner('');setDeadlineBE('');setReturnDateBE('');setSalesperson('');setAmount('');setTransportCost('');
+      setIsManutan(false);setIsPlaque(false);setIsTube(false);setIsHoshin(false);setIsReservation(false);
+    }
+  },[taskToEdit,isOpen]);
+
+  useEffect(()=>{
+    if(!taskToEdit&&selectedOpIds.length>0){
+      const opId=selectedOpIds[selectedOpIds.length-1];
+      const opTasks=tasks.filter(t=>t.operatorIds.includes(opId));
+      if(opTasks.length>0){
+        const latest=opTasks.reduce((a,b)=>calculateTaskEnd(a)>calculateTaskEnd(b)?a:b);
+        const end=calculateTaskEnd(latest);
+        setStartDate(end.toISOString().split('T')[0]);setStartTime(end.getHours().toString().padStart(2,'0')+':'+end.getMinutes().toString().padStart(2,'0'));
+        setOpStarts(prev=>({...prev,[opId]:end.toISOString()}));
+      }
+    }
+  },[selectedOpIds,tasks,taskToEdit]);
+
+  const handleToggleSpecial=(type,val)=>{
+    if(type==='manutan'){setIsManutan(val);if(val)setTaskColor('#ec4899');}
+    else if(type==='reservation'){setIsReservation(val);if(val)setTaskColor('#facc15');}
+    else if(type==='hoshin'){setIsHoshin(val);if(val)setTaskColor('#ffffff');}
+    else if(type==='plaque')setIsPlaque(val);
+    else if(type==='tube')setIsTube(val);
+  };
+  const toggleOp=(id)=>setSelectedOpIds(prev=>{
+    if(prev.includes(id)){const ns={...opStarts};delete ns[id];setOpStarts(ns);const nd={...opDurations};delete nd[id];setOpDurations(nd);return prev.filter(o=>o!==id);}
+    return[...prev,id];
+  });
+  const handleSubmit=(e)=>{
+    e.preventDefault();
+    if(!startDate||!startTime){alert("Veuillez renseigner la date et l'heure de début.");return;}
+    const startDT=new Date(startDate+'T'+startTime);
+    if(isNaN(startDT.getTime())){alert("Date ou heure invalide.");return;}
+    const cleanStarts={};
+    Object.entries(opStarts).forEach(([k,v])=>{if(v&&!isNaN(new Date(v).getTime()))cleanStarts[k]=v;});
+    const newTask={
+      id:taskToEdit?taskToEdit.id:Date.now().toString(),
+      client:client.trim().toUpperCase(),orderNumber,
+      duration:duration===''?0:parseFloat(duration),realDuration:realDuration?parseFloat(realDuration):undefined,
+      furnitureCount:furnitureCount===''?0:parseInt(furnitureCount),
+      start:startDT,operatorIds:selectedOpIds,operatorStarts:cleanStarts,operatorDurations:opDurations,
+      priority,status,color:taskColor,description,shippingDate,horsCatalogue:hcItems,
+      receptionDate,transmissionDateToBE,designer,deadlineBE,returnDateBE,salesperson,
+      amount:amount===''?undefined:Number(amount),transportCost:transportCost===''?undefined:Number(transportCost),
+      isManutan,isPlaque,isTubeCutting:isTube,isHoshin,isReservation
+    };
+    onSaveTask(newTask);onClose();
+  };
+  if(!isOpen)return null;
+  return(
+    <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[100000] p-4 backdrop-blur-xl">
+      <div className="bg-[#1e2533] rounded-[2.5rem] border border-white/5 w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
+        <div className="flex justify-between items-center px-10 py-8 border-b border-white/5 bg-[#161d2b]/50">
+          <h2 className="text-2xl font-black text-white uppercase tracking-tight">{taskToEdit?'Modifier la Commande':'Nouvelle Commande Montage'}</h2>
+          <button onClick={onClose} className="text-slate-500 hover:text-white"><XIcon className="h-8 w-8"/></button>
+        </div>
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto px-10 py-8 space-y-8 scrollbar-hide">
+          <div className="flex flex-wrap gap-3">
+            {[{label:'MANUTAN',state:isManutan,type:'manutan'},{label:'PLAQUE INTERNE',state:isPlaque,type:'plaque'},{label:'COUPE TUBE',state:isTube,type:'tube'},{label:'HOSHIN',state:isHoshin,type:'hoshin'},{label:'RÉSERVATION',state:isReservation,type:'reservation'}].map(item=>(
+              <label key={item.label} className={`flex items-center gap-3 px-5 py-4 rounded-xl border cursor-pointer transition-all ${item.state?'bg-blue-600/20 border-blue-500 text-blue-400':'bg-[#161d2b] border-white/5 text-slate-500 hover:bg-white/5'}`}>
+                <input type="checkbox" checked={item.state} onChange={e=>handleToggleSpecial(item.type,e.target.checked)} className="hidden"/>
+                <div className={`w-5 h-5 border-2 rounded flex items-center justify-center ${item.state?'bg-blue-500 border-blue-500':'border-slate-700'}`}>{item.state&&<div className="w-2 h-2 bg-white rounded-sm"/>}</div>
+                <span className="text-[10px] font-black uppercase tracking-widest">{item.label}</span>
+              </label>
+            ))}
+          </div>
+          <div className="grid grid-cols-2 gap-8">
+            <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">N° DE COMMANDE *</label><input required value={orderNumber} onChange={e=>setOrderNumber(e.target.value.replace(/\D/g,''))} className="w-full bg-[#161d2b] border border-white/5 rounded-2xl p-5 text-white outline-none focus:border-blue-500 font-bold" placeholder="CHIFFRES UNIQUEMENT"/></div>
+            <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">CLIENT *</label><input required value={client} onChange={e=>setClient(e.target.value.toUpperCase())} className="w-full bg-[#161d2b] border border-white/5 rounded-2xl p-5 text-white font-bold outline-none focus:border-blue-500 uppercase" placeholder="EX: HERMES"/></div>
+            <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">NB DE MEUBLES</label><input type="number" value={furnitureCount} onChange={e=>setFurnitureCount(e.target.value===''?'':parseInt(e.target.value))} className="w-full bg-[#161d2b] border border-white/5 rounded-2xl p-5 text-white outline-none font-bold" placeholder="À définir"/></div>
+            <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">EXPÉDITION</label><input type="date" value={shippingDate} onChange={e=>setShippingDate(e.target.value)} className="w-full bg-[#161d2b] border border-white/5 rounded-2xl p-5 text-white outline-none font-bold"/></div>
+          </div>
+          <div className="grid grid-cols-2 gap-8 items-end">
+            <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">DÉBUT DU MONTAGE *</label>
+              <div className="flex gap-2"><input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} className="flex-1 bg-[#161d2b] border border-white/5 rounded-2xl p-5 text-white font-bold outline-none"/><input type="time" value={startTime} onChange={e=>setStartTime(e.target.value)} className="w-32 bg-[#161d2b] border border-white/5 rounded-2xl p-5 text-white font-bold outline-none"/></div>
+            </div>
+            <div className="bg-blue-600/10 border border-blue-500/30 text-blue-400 py-5 px-6 rounded-2xl text-[9px] font-black uppercase tracking-widest text-center italic leading-tight">AIMANT AUTOMATIQUE ACTIVÉ :<br/>Le début s'ajuste à la fin de la tâche précédente dès que vous cochez un monteur.</div>
+          </div>
+          <div className="grid grid-cols-2 gap-8">
+            <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">TEMPS THÉORIQUE (H) *</label><input required type="number" step="0.5" value={duration} onChange={e=>setDuration(e.target.value===''?'':parseFloat(e.target.value))} className="w-full bg-[#161d2b] border border-white/5 rounded-2xl p-5 text-white font-bold outline-none" placeholder="À définir"/></div>
+            <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">TEMPS RÉEL (H)</label><input type="number" step="0.5" value={realDuration||''} onChange={e=>setRealDuration(e.target.value===''?undefined:parseFloat(e.target.value))} className="w-full bg-[#161d2b] border border-white/5 rounded-2xl p-5 text-white outline-none font-bold" placeholder="Heure réelle"/></div>
+          </div>
+          <div className="space-y-4 pt-4">
+            <div className="flex justify-between items-center"><h3 className="text-[11px] font-black text-amber-500 uppercase tracking-widest">HORS CATALOGUE (HC)</h3><button type="button" onClick={()=>setHcItems([...hcItems,{id:`hc-${Date.now()}`,name:'HC: ',receptionDate:new Date().toISOString().split('T')[0],received:false}])} className="text-[9px] font-black text-white/70 bg-white/5 px-5 py-2.5 rounded-xl border border-white/5 hover:bg-white/10">+ PIÈCE HC</button></div>
+            <div className={`border-2 border-dashed border-white/5 rounded-3xl p-6 ${hcItems.length===0?'py-14 text-center':''}`}>
+              {hcItems.length===0?<span className="text-[11px] text-slate-600 font-bold italic">Aucune pièce HC spécifiée.</span>:(
+                <div className="space-y-3">{hcItems.map(item=>(
+                  <div key={item.id} className="flex flex-col gap-3 bg-slate-900/50 p-4 rounded-2xl border border-white/5">
+                    <div className="flex items-center gap-3"><input value={item.name} onChange={e=>setHcItems(hcItems.map(i=>i.id===item.id?{...i,name:e.target.value.toUpperCase()}:i))} className="flex-1 bg-transparent border-none outline-none text-[11px] font-black text-white uppercase" placeholder="HC: décrire le besoin..."/><button type="button" onClick={()=>setHcItems(hcItems.filter(i=>i.id!==item.id))} className="text-slate-600 hover:text-red-500"><TrashIcon className="h-5 w-5"/></button></div>
+                    <div className="flex items-end gap-4">
+                      <div className="flex flex-col gap-1 flex-1"><label className="text-[8px] font-black text-slate-500 uppercase">RÉCEPTION THÉORIQUE</label><input type="date" value={item.receptionDate} onChange={e=>setHcItems(hcItems.map(i=>i.id===item.id?{...i,receptionDate:e.target.value}:i))} className="w-full bg-slate-800 rounded-lg p-2 text-[10px] text-white outline-none"/></div>
+                      <div className="flex flex-col gap-1 flex-1"><label className="text-[8px] font-black text-slate-500 uppercase">RÉCEPTION RÉELLE</label><input type="date" value={item.realReceptionDate||''} onChange={e=>setHcItems(hcItems.map(i=>i.id===item.id?{...i,realReceptionDate:e.target.value}:i))} className="w-full bg-slate-800 rounded-lg p-2 text-[10px] text-white outline-none"/></div>
+                      <div className="flex flex-col gap-1 items-center"><label className="text-[8px] font-black text-slate-500 uppercase">REÇU</label><button type="button" onClick={()=>setHcItems(hcItems.map(i=>i.id===item.id?{...i,received:!i.received}:i))} className={`p-2 rounded-lg transition-all ${item.received?'bg-emerald-500 text-white':'bg-slate-800 text-slate-500'}`}><CheckCircleIcon className="h-5 w-5"/></button></div>
+                    </div>
+                  </div>
+                ))}</div>
+              )}
+            </div>
+          </div>
+          <div className="space-y-4 pt-4">
+            <h3 className="text-[10px] font-black text-white uppercase tracking-widest ml-1">SUIVI BE & COMMERCIAL</h3>
+            <div className="bg-[#161d2b] border border-white/5 rounded-3xl p-8 space-y-8">
+              <div className="grid grid-cols-2 gap-8">
+                <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">RÉCEPTION COMMANDE</label><input type="date" value={receptionDate} onChange={e=>setReceptionDate(e.target.value)} className="w-full bg-[#1e2533] border border-white/5 rounded-2xl p-5 text-white outline-none font-bold"/></div>
+                <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">TRANSMISSION BE</label><input type="date" value={transmissionDateToBE} onChange={e=>setTransmissionDateToBE(e.target.value)} className="w-full bg-[#1e2533] border border-white/5 rounded-2xl p-5 text-white outline-none font-bold"/></div>
+              </div>
+              <div className="grid grid-cols-2 gap-8">
+                <EditableSelect label="DESSINATEUR" value={designer} onChange={setDesigner} options={designers} onOptionsChange={setDesigners}/>
+                <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">DEADLINE BE</label><input type="date" value={deadlineBE} onChange={e=>setDeadlineBE(e.target.value)} className="w-full bg-[#1e2533] border border-white/5 rounded-2xl p-5 text-white outline-none font-bold"/></div>
+              </div>
+              <div className="grid grid-cols-2 gap-8">
+                <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">RETOUR DU BE</label><input type="date" value={returnDateBE} onChange={e=>setReturnDateBE(e.target.value)} className="w-full bg-[#1e2533] border border-white/5 rounded-2xl p-5 text-white outline-none font-bold"/></div>
+                <EditableSelect label="COMMERCIAL" value={salesperson} onChange={setSalesperson} options={salespeople} onOptionsChange={setSalespeople}/>
+              </div>
+              <div className="grid grid-cols-2 gap-8 pt-4 border-t border-white/5">
+                <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">MONTANT COMMANDE (€)</label><input type="number" step="0.01" value={amount} onChange={e=>setAmount(e.target.value===''?'':parseFloat(e.target.value))} className="w-full bg-[#1e2533] border border-white/5 rounded-2xl p-5 text-white outline-none font-bold" placeholder="0.00 €"/></div>
+                <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">COÛT TRANSPORT (€)</label><input type="number" step="0.01" value={transportCost} onChange={e=>setTransportCost(e.target.value===''?'':parseFloat(e.target.value))} className="w-full bg-[#1e2533] border border-white/5 rounded-2xl p-5 text-white outline-none font-bold" placeholder="0.00 €"/></div>
+              </div>
+            </div>
+          </div>
+          <div className="space-y-4 pt-4">
+            <h3 className="text-[10px] font-black text-white uppercase tracking-widest ml-1">ASSIGNATION & DÉBUTS INDIVIDUELS *</h3>
+            <div className="bg-[#161d2b] border border-white/5 rounded-3xl overflow-hidden divide-y divide-white/5">
+              {operators.map(op=>{const isSel=selectedOpIds.includes(op.id);return(
+                <div key={op.id} className={`flex items-center gap-6 p-6 hover:bg-white/5 transition-all ${isSel?'bg-white/5':''}`}>
+                  <div className="flex items-center gap-6 flex-1 cursor-pointer" onClick={()=>toggleOp(op.id)}>
+                    <div className={`w-6 h-6 border-2 rounded flex items-center justify-center ${isSel?'bg-blue-500 border-blue-500':'border-slate-700 bg-slate-900'}`}>{isSel&&<div className="w-2.5 h-2.5 bg-white rounded-sm"/>}</div>
+                    <div className="w-11 h-11 rounded-full flex items-center justify-center text-[11px] font-black text-white" style={{backgroundColor:op.color}}>{op.name.substring(0,3)}</div>
+                    <span className="text-[15px] font-black text-slate-400 uppercase tracking-tight flex-1">{op.name}</span>
+                  </div>
+                  {isSel&&(<div className="flex items-center gap-3">
+                    <div className="flex flex-col gap-1"><label className="text-[8px] font-black text-slate-500 uppercase">DÉBUT</label><input type="datetime-local" value={opStarts[op.id]?new Date(opStarts[op.id]).toISOString().slice(0,16):`${startDate}T${startTime}`} onChange={e=>setOpStarts({...opStarts,[op.id]:e.target.value})} className="bg-slate-900/50 border border-slate-700 rounded-lg p-2 text-[10px] text-white outline-none w-36"/></div>
+                    <div className="flex flex-col gap-1"><label className="text-[8px] font-black text-slate-500 uppercase">DURÉE (H)</label><input type="number" step="0.5" placeholder="Auto" value={opDurations[op.id]||''} onChange={e=>setOpDurations({...opDurations,[op.id]:parseFloat(e.target.value)})} className="bg-slate-900/50 border border-slate-700 rounded-lg p-2 text-[10px] text-white outline-none w-16 text-center font-bold"/></div>
+                  </div>)}
+                </div>
+              );})}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-8">
+            <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">STATUT</label>
+              <select value={status} onChange={e=>{
+                if(e.target.value==='completed'){
+                  const pendingHC=(hcItems||[]).filter(i=>!i.received);
+                  if(pendingHC.length>0){
+                    alert(`⚠️ Impossible de terminer la commande :\n${pendingHC.length} pièce(s) HC non reçue(s) :\n${pendingHC.map(i=>` • ${i.name||'PIÈCE HC'}`).join('\n')}\n\nMarquez toutes les pièces HC comme reçues avant de terminer.`);
+                    return;
+                  }
+                }
+                setStatus(e.target.value);
+              }} className="w-full bg-[#161d2b] border border-white/5 rounded-2xl p-5 text-white font-bold outline-none appearance-none">
+                <option value="planned">Planifiée</option>
+                <option value="in_progress">En cours</option>
+                <option value="completed">Terminée</option>
+              </select>
+              {(hcItems||[]).some(i=>!i.received)&&<p className="text-[9px] text-amber-500 font-black uppercase mt-1 ml-1">⚠ {(hcItems||[]).filter(i=>!i.received).length} pièce(s) HC en attente — terminaison bloquée</p>}
+            </div>
+            <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">PRIORITÉ</label><select value={priority} onChange={e=>setPriority(e.target.value)} className="w-full bg-[#161d2b] border border-white/5 rounded-2xl p-5 text-white font-bold outline-none appearance-none"><option value="Normal">Normale</option><option value="Urgent">Urgente</option></select></div>
+          </div>
+          <div className="space-y-4 pt-4">
+            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">COULEUR</label>
+            <div className="flex flex-wrap gap-3 p-6 bg-[#161d2b] border border-white/5 rounded-3xl">
+              {TASK_COLORS.slice(0,-1).map(color=>(<button key={color} type="button" onClick={()=>setTaskColor(color)} className={`w-10 h-10 rounded-full border-2 transition-all ${taskColor===color?'border-white scale-110 shadow-lg':'border-transparent hover:scale-105'}`} style={{backgroundColor:color}}/>))}
+              <input type="color" value={taskColor} onChange={e=>setTaskColor(e.target.value)} className="w-10 h-10 rounded-full border-2 border-slate-700 cursor-pointer bg-transparent overflow-hidden"/>
+            </div>
+          </div>
+          <div className="space-y-4 pt-4 pb-10">
+            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">COMMENTAIRES DE MONTAGE</label>
+            <textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Instructions pour le monteur..." className="w-full bg-[#161d2b] border border-white/5 rounded-3xl p-8 text-white text-sm outline-none focus:border-blue-500 min-h-[120px] resize-none font-bold"/>
+          </div>
+        </form>
+        <div className="p-10 bg-[#161d2b]/50 border-t border-white/5 flex items-center justify-between">
+          <button onClick={onClose} className="px-10 py-5 border border-white/10 text-white text-[11px] font-black rounded-2xl uppercase tracking-widest hover:bg-white/5 transition-all">Annuler</button>
+          <button onClick={handleSubmit} className="px-14 py-5 bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-black rounded-2xl uppercase tracking-widest flex items-center gap-4 shadow-2xl active:scale-95 transition-all">
+            <CheckCircleIcon className="h-5 w-5"/>{taskToEdit?'METTRE À JOUR':'ENREGISTRER LA COMMANDE'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const DashboardModal=({isOpen,onClose,tasks,operators,onUpdateTask})=>{
+  const[selMonth,setSelMonth]=useState('all');
+  const yr=new Date().getFullYear();
+  const stats=useMemo(()=>{
+    let thH=0,rlH=0,eff=0,furn=0;
+    const today=new Date();today.setHours(0,0,0,0);
+    const opS={};const clS={},salesS={};const pipe={planned:0,in_progress:0,completed:0};let tot=0;
+    let bDays=0,bCnt=0,mDays=0,mCnt=0;const hcAll=[];let lateHc=0,pendHc=0;
+    const beItems=[];let bePending=0,beLate=0,beCompleted=0;
+    operators.forEach(op=>{opS[op.id]={count:0,completedCount:0,theoHours:0,realHours:0,furnitures:0,name:op.name,color:op.color};});
+    const ft=tasks.filter(t=>{if(t.client==='CONGES')return false;if(selMonth==='all')return true;const d=new Date(t.start);return d.getMonth()===selMonth&&d.getFullYear()===yr;});
+    ft.forEach(task=>{
+      tot++;if(task.furnitureCount)furn+=task.furnitureCount;if(pipe[task.status]!==undefined)pipe[task.status]++;
+      if(task.salesperson&&task.amount){const sp=task.salesperson.trim().toUpperCase();if(!salesS[sp])salesS[sp]={amount:0,count:0};salesS[sp].amount+=task.amount;salesS[sp].count++;}
+      if(task.transmissionDateToBE&&task.returnDateBE){const d=(new Date(task.returnDateBE)-new Date(task.transmissionDateToBE))/(1000*3600*24);if(d>=0){bDays+=d;bCnt++;}}
+      if(task.returnDateBE&&task.start){const d=(new Date(task.start)-new Date(task.returnDateBE))/(1000*3600*24);if(d>=0){mDays+=d;mCnt++;}}
+      // Suivi BE détaillé
+      if(task.receptionDate||task.transmissionDateToBE||task.deadlineBE){
+        const hasReturn=!!task.returnDateBE;
+        const dlPassed=task.deadlineBE&&!hasReturn&&new Date(task.deadlineBE)<today;
+        const dlDiff=task.deadlineBE?Math.ceil((today-new Date(task.deadlineBE))/(1000*60*60*24)):null;
+        if(hasReturn)beCompleted++;else if(dlPassed){beLate++;}else bePending++;
+        beItems.push({client:task.client,orderNumber:task.orderNumber||'N/A',taskId:task.id,receptionDate:task.receptionDate,transmissionDate:task.transmissionDateToBE,deadlineBE:task.deadlineBE,returnDateBE:task.returnDateBE,designer:task.designer,salesperson:task.salesperson,shippingDate:task.shippingDate,shippingStatus:task.shippingStatus||'waiting',hasReturn,isLate:dlPassed,dlDiff});
+      }
+      if(task.status==='completed'&&task.realDuration!==undefined){thH+=task.duration;rlH+=task.realDuration;eff+=(task.duration-task.realDuration);}
+      (task.horsCatalogue||[]).forEach(item=>{const rd=new Date(item.receptionDate);rd.setHours(0,0,0,0);const dd=Math.ceil((today-rd)/(1000*60*60*24));const late=!item.received&&dd>0;if(late)lateHc++;if(!item.received)pendHc++;hcAll.push({...item,client:task.client,orderNumber:task.orderNumber||'N/A',isLate:late,daysDiff:dd});});
+      const cn=task.client.trim().toUpperCase();if(!clS[cn])clS[cn]={count:0};clS[cn].count++;
+      task.operatorIds.forEach(opId=>{const op=opS[opId];if(op){op.count++;if(task.furnitureCount)op.furnitures+=(task.furnitureCount/(task.operatorIds.length||1));if(task.status==='completed'&&task.realDuration!==undefined){op.completedCount++;op.theoHours+=(task.duration/(task.operatorIds.length||1));op.realHours+=(task.realDuration/(task.operatorIds.length||1));}}});
+    });
+    return{totalOrders:tot,totalHoursReal:Math.round(rlH),efficiencyDelta:Math.round(eff),totalFurnitures:Math.round(furn),pipeline:pipe,lateHcCount:lateHc,hcItems:hcAll.sort((a,b)=>(b.isLate?1:0)-(a.isLate?1:0)||b.daysDiff-a.daysDiff),clients:Object.entries(clS).sort(([,a],[,b])=>b.count-a.count),operators:Object.values(opS).sort((a,b)=>(b.theoHours||b.furnitures)-(a.theoHours||a.furnitures)),sales:Object.entries(salesS).sort(([,a],[,b])=>b.amount-a.amount),avgBEDelay:bCnt>0?bDays/bCnt:0,avgMontageDelay:mCnt>0?mDays/mCnt:0,beItems:beItems.sort((a,b)=>(b.isLate?1:0)-(a.isLate?1:0)),bePending,beLate,beCompleted};
+  },[tasks,operators,selMonth,yr]);
+  if(!isOpen)return null;
+  return(<div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[200] p-4 backdrop-blur-sm">
+    <div className="bg-[#1e293b] rounded-[3rem] shadow-2xl border border-gray-700 w-full max-w-7xl max-h-[92vh] overflow-hidden flex flex-col">
+      <div className="flex justify-between items-center p-10 pb-6">
+        <div><h2 className="text-4xl font-black text-white uppercase tracking-tighter">Analyse Atelier</h2><p className="text-gray-500 font-bold text-xs uppercase tracking-widest mt-1">Période : {selMonth==='all'?'Année complète':MONTHS[selMonth]} {yr}</p></div>
+        <button onClick={onClose} className="p-3 bg-gray-800 text-gray-400 hover:text-white rounded-full border border-gray-700"><XIcon className="h-8 w-8"/></button>
+      </div>
+      <div className="px-10 mb-6">
+        <div className="bg-slate-900/50 p-1.5 rounded-3xl border border-slate-800 flex items-center overflow-x-auto gap-1">
+          <button onClick={()=>setSelMonth('all')} className={`px-6 py-3 rounded-2xl text-[11px] font-black uppercase whitespace-nowrap transition-all ${selMonth==='all'?'bg-blue-600 text-white':'text-slate-500 hover:text-slate-300'}`}>Tout</button>
+          <div className="w-px h-6 bg-slate-800 mx-2 flex-shrink-0"></div>
+          {MONTHS.map((m,i)=>(<button key={m} onClick={()=>setSelMonth(i)} className={`px-5 py-3 rounded-2xl text-[11px] font-black uppercase tracking-tighter whitespace-nowrap transition-all ${selMonth===i?'bg-slate-700 text-white border border-slate-600':'text-slate-500 hover:text-slate-300'}`}>{m}</button>))}
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto p-10 pt-2 space-y-10">
+        <div className="grid grid-cols-5 gap-6">
+          {[{l:'Production',v:stats.totalOrders,u:'Ordres',c:'text-white',b:'hover:border-blue-500/30'},{l:'Retards HC',v:stats.lateHcCount,u:'Pièces',c:stats.lateHcCount>0?'text-red-500 animate-pulse':'text-slate-700',b:'hover:border-red-500/50'},{l:'Volume Meubles',v:stats.totalFurnitures,u:'Unités',c:'text-white',b:'hover:border-blue-500/30'},{l:'Temps Réel',v:stats.totalHoursReal,u:'Heures',c:'text-green-400',b:'hover:border-green-500/30'},{l:'Efficacité',v:`${stats.efficiencyDelta>0?'+':''}${stats.efficiencyDelta}H`,u:'',c:stats.efficiencyDelta>=0?'text-emerald-400':'text-red-400',b:'hover:border-emerald-500/30'}].map((card,i)=>(
+            <div key={i} className={`bg-slate-900/60 rounded-3xl p-6 border border-slate-800 flex flex-col justify-between group transition-all ${card.b}`}>
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{card.l}</span>
+              <div className="flex items-baseline gap-2 mt-4"><span className={`text-4xl font-black ${card.c}`}>{card.v}</span>{card.u&&<span className="text-xs font-bold text-slate-600">{card.u}</span>}</div>
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-3 gap-8">
+          <div className="col-span-2 space-y-8">
+            <div className="bg-slate-900/40 rounded-3xl border border-slate-800 overflow-hidden">
+              <div className="px-8 py-6 bg-slate-800/30 border-b border-slate-800 flex justify-between items-center">
+                <h3 className="text-sm font-black text-white uppercase tracking-[0.2em] flex items-center gap-3"><ClockIcon className="h-4 w-4 text-amber-500"/>Suivi Pièces Hors Catalogue</h3>
+                <span className="text-[10px] font-black text-red-500 uppercase">Retards: {stats.lateHcCount}</span>
+              </div>
+              <div className="overflow-auto max-h-64"><table className="w-full text-left">
+                <thead className="text-[9px] text-slate-500 font-black uppercase bg-slate-950/50 sticky top-0"><tr><th className="px-8 py-4">Pièce HC</th><th className="px-4 py-4">Client / CMD</th><th className="px-4 py-4 text-center">Date Prévue</th><th className="px-4 py-4 text-center">Statut</th></tr></thead>
+                <tbody className="divide-y divide-slate-800/50">
+                  {stats.hcItems.length>0?stats.hcItems.map((hc,i)=>(<tr key={i} className={`hover:bg-slate-800/40 ${hc.isLate?'bg-red-500/5':''}`}><td className="px-8 py-4 font-black text-white text-xs uppercase">{hc.name}</td><td className="px-4 py-4"><div className="flex flex-col"><span className="text-[10px] font-black text-slate-400">{hc.client}</span><span className="text-[9px] text-slate-500">CMD {hc.orderNumber}</span></div></td><td className="px-4 py-4 text-center"><span className={`text-[10px] font-black ${hc.isLate?'text-red-500':'text-slate-400'}`}>{new Date(hc.receptionDate).toLocaleDateString('fr-FR')}</span></td><td className="px-4 py-4 text-center">{hc.received?<span className="px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-500 text-[8px] font-black border border-emerald-500/20 uppercase">Reçue</span>:hc.isLate?<span className="px-3 py-1 rounded-full bg-red-500/20 text-red-500 text-[8px] font-black border border-red-500/30 uppercase animate-pulse">Retard {hc.daysDiff}J</span>:<span className="px-3 py-1 rounded-full bg-slate-800 text-slate-400 text-[8px] font-black border border-slate-700 uppercase">En attente</span>}</td></tr>))
+                  :<tr><td colSpan={4} className="py-12 text-center text-slate-600 font-bold italic text-sm">Aucune pièce HC.</td></tr>}
+                </tbody>
+              </table></div>
+            </div>
+            <div className="grid grid-cols-2 gap-8">
+              <div className="bg-slate-900/40 rounded-3xl p-8 border border-slate-800">
+                <h3 className="text-sm font-black text-white uppercase tracking-[0.2em] mb-6">Performance Commerciale</h3>
+                <div className="space-y-4 max-h-48 overflow-y-auto">
+                  {stats.sales.map(([name,data],i)=>(<div key={i} className="flex justify-between items-center py-3 border-b border-slate-800/50 last:border-0"><div><span className="text-[10px] font-black text-slate-300 uppercase">{name}</span><p className="text-[9px] text-slate-500">{data.count} dossiers</p></div><span className="text-xs font-black text-emerald-400">{data.amount.toLocaleString('fr-FR',{style:'currency',currency:'EUR'})}</span></div>))}
+                  {stats.sales.length===0&&<p className="text-center text-slate-600 text-xs italic py-4">Aucune donnée commerciale.</p>}
+                </div>
+              </div>
+              <div className="bg-slate-900/40 rounded-3xl p-8 border border-slate-800">
+                <h3 className="text-sm font-black text-white uppercase tracking-[0.2em] mb-6">Délais Moyens</h3>
+                <div className="space-y-6">
+                  {[{l:'Traitement BE',v:stats.avgBEDelay,c:'bg-indigo-500'},{l:'Réactivité Montage',v:stats.avgMontageDelay,c:'bg-blue-500'}].map((item,i)=>(<div key={i}><div className="flex justify-between items-end mb-2"><span className="text-[10px] font-black text-slate-500 uppercase">{item.l}</span><span className="text-2xl font-black text-white">{item.v.toFixed(1)} <span className="text-xs text-slate-600">Jours</span></span></div><div className="w-full bg-slate-800 rounded-full h-1.5"><div className={`${item.c} h-full rounded-full`} style={{width:`${Math.min(100,item.v*10)}%`}}></div></div></div>))}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="space-y-8">
+            <div className="bg-slate-900/40 rounded-3xl p-8 border border-slate-800">
+              <h3 className="text-sm font-black text-white uppercase tracking-[0.2em] mb-6 flex items-center gap-3"><div className="w-1.5 h-4 bg-blue-500 rounded-full"></div>Pipeline</h3>
+              <div className="space-y-6">
+                {[{l:'Terminées',c:stats.pipeline.completed,col:'bg-emerald-500'},{l:'En cours',c:stats.pipeline.in_progress,col:'bg-blue-500'},{l:'Planifiées',c:stats.pipeline.planned,col:'bg-slate-700'}].map(item=>(<div key={item.l}><div className="flex justify-between text-[10px] font-black uppercase mb-2"><span className="text-slate-500">{item.l}</span><span className="text-white">{item.c}</span></div><div className="w-full bg-slate-800 rounded-full h-1.5"><div className={`${item.col} h-full`} style={{width:`${stats.totalOrders?(item.c/stats.totalOrders)*100:0}%`}}></div></div></div>))}
+              </div>
+            </div>
+            <div className="bg-slate-900/40 rounded-3xl p-8 border border-slate-800">
+              <h3 className="text-sm font-black text-white uppercase tracking-[0.2em] mb-6">Top Clients</h3>
+              <div className="space-y-4 max-h-36 overflow-y-auto">
+                {stats.clients.slice(0,5).map(([client,data],i)=>(<div key={i} className="flex justify-between items-center py-2 border-b border-slate-800/50"><span className="text-[10px] font-black text-slate-400 uppercase truncate w-32">{client}</span><span className="text-[10px] font-black text-blue-500">{data.count} CMD</span></div>))}
+              </div>
+            </div>
+          </div>
+        </div>
+        {/* SUIVI BE & COMMERCIAL */}
+        <div className="bg-slate-900/40 rounded-3xl border border-slate-800 overflow-hidden">
+          <div className="px-8 py-6 bg-slate-800/30 border-b border-slate-800 flex justify-between items-center flex-wrap gap-4">
+            <h3 className="text-sm font-black text-white uppercase tracking-[0.2em] flex items-center gap-3"><DraftingIcon className="h-4 w-4 text-indigo-400"/>Suivi BE & Commercial</h3>
+            <div className="flex items-center gap-4">
+              <span className="px-3 py-1 rounded-full bg-red-500/20 text-red-400 text-[9px] font-black border border-red-500/30 uppercase">⚠ {stats.beLate} en retard</span>
+              <span className="px-3 py-1 rounded-full bg-amber-500/20 text-amber-400 text-[9px] font-black border border-amber-500/30 uppercase">⏳ {stats.bePending} en attente</span>
+              <span className="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-400 text-[9px] font-black border border-emerald-500/30 uppercase">✓ {stats.beCompleted} traités</span>
+            </div>
+          </div>
+          <div className="overflow-auto max-h-72">
+            <table className="w-full text-left">
+              <thead className="text-[9px] text-slate-500 font-black uppercase bg-slate-950/50 sticky top-0">
+                <tr>
+                  <th className="px-6 py-4">Client / CMD</th>
+                  <th className="px-4 py-4">Dessinateur</th>
+                  <th className="px-4 py-4">Commercial</th>
+                  <th className="px-4 py-4 text-center">Réception</th>
+                  <th className="px-4 py-4 text-center">Transmis BE</th>
+                  <th className="px-4 py-4 text-center">Deadline BE</th>
+                  <th className="px-4 py-4 text-center">Retour BE</th>
+                  <th className="px-4 py-4 text-center">Statut BE</th>
+                  <th className="px-4 py-4 text-center">🚚 Expédition</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/50">
+                {stats.beItems.length>0?stats.beItems.map((be,i)=>{
+                  const fmt=d=>d?new Date(d).toLocaleDateString('fr-FR',{day:'2-digit',month:'short'}):'-';
+                  const ss=be.shippingStatus;
+                  const nextStatus={waiting:'ready',ready:'shipped',shipped:'waiting'};
+                  const statusStyle={
+                    waiting:{label:'En attente',bg:'rgba(51,65,85,.8)',border:'#475569',color:'#94a3b8'},
+                    ready:{label:'✓ Prêt',bg:'rgba(234,179,8,.15)',border:'#ca8a04',color:'#fbbf24'},
+                    shipped:{label:'🚚 Expédié',bg:'rgba(34,197,94,.15)',border:'#16a34a',color:'#4ade80'}
+                  }[ss]||{label:'En attente',bg:'rgba(51,65,85,.8)',border:'#475569',color:'#94a3b8'};
+                  return(<tr key={i} className={`hover:bg-slate-800/40 ${be.isLate?'bg-red-500/5':ss==='shipped'?'bg-emerald-500/3':''}`}>
+                    <td className="px-6 py-4"><div className="flex flex-col"><span className="text-[11px] font-black text-white uppercase">{be.client}</span><span className="text-[9px] text-slate-500">CMD {be.orderNumber}</span></div></td>
+                    <td className="px-4 py-4 text-[10px] font-bold text-slate-300 uppercase">{be.designer||'—'}</td>
+                    <td className="px-4 py-4 text-[10px] font-bold text-slate-300 uppercase">{be.salesperson||'—'}</td>
+                    <td className="px-4 py-4 text-center text-[10px] font-bold text-slate-400">{fmt(be.receptionDate)}</td>
+                    <td className="px-4 py-4 text-center text-[10px] font-bold text-blue-400">{fmt(be.transmissionDate)}</td>
+                    <td className="px-4 py-4 text-center"><span className={`text-[10px] font-black ${be.isLate?'text-red-400':be.deadlineBE?'text-amber-400':'text-slate-600'}`}>{fmt(be.deadlineBE)}</span></td>
+                    <td className="px-4 py-4 text-center text-[10px] font-bold text-emerald-400">{fmt(be.returnDateBE)}</td>
+                    <td className="px-4 py-4 text-center">
+                      {be.hasReturn?<span className="px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-400 text-[8px] font-black border border-emerald-500/30 uppercase">✓ Traité</span>
+                      :be.isLate?<span className="px-2 py-1 rounded-full bg-red-500/20 text-red-400 text-[8px] font-black border border-red-500/30 uppercase animate-pulse">Retard {be.dlDiff}J</span>
+                      :be.transmissionDate?<span className="px-2 py-1 rounded-full bg-amber-500/15 text-amber-400 text-[8px] font-black border border-amber-500/30 uppercase">En cours</span>
+                      :<span className="px-2 py-1 rounded-full bg-slate-800 text-slate-500 text-[8px] font-black border border-slate-700 uppercase">Non transmis</span>}
+                    </td>
+                    <td className="px-4 py-4 text-center">
+                      <button onClick={()=>onUpdateTask(be.taskId,{shippingStatus:nextStatus[ss]})} title="Cliquer pour changer le statut" style={{padding:'4px 10px',borderRadius:'20px',border:`1px solid ${statusStyle.border}`,backgroundColor:statusStyle.bg,color:statusStyle.color,fontSize:'9px',fontWeight:900,textTransform:'uppercase',cursor:'pointer',whiteSpace:'nowrap',transition:'all .15s'}}>
+                        {statusStyle.label}
+                      </button>
+                      {be.shippingDate&&<div style={{fontSize:'8px',color:'#64748b',marginTop:'3px'}}>{fmt(be.shippingDate)}</div>}
+                    </td>
+                  </tr>);
+                }):<tr><td colSpan={9} className="py-12 text-center text-slate-600 font-bold italic text-sm">Aucun suivi BE renseigné.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div className="bg-slate-900/40 rounded-3xl border border-slate-800 overflow-hidden">
+          <div className="px-8 py-6 border-b border-slate-800 flex justify-between items-center"><h3 className="text-sm font-black text-white uppercase tracking-[0.2em]">Efficacité Individuelle</h3><span className="text-[9px] font-bold text-slate-500 uppercase">Temps Théo vs Réel</span></div>
+          <div className="overflow-x-auto"><table className="w-full text-left">
+            <thead className="text-[9px] text-slate-500 font-black uppercase bg-slate-950/50"><tr><th className="px-8 py-5">Opérateur</th><th className="px-4 py-5 text-center">Cdes OK</th><th className="px-4 py-5 text-center">Gain (H)</th><th className="px-8 py-5 text-right">Ratio Productivité</th></tr></thead>
+            <tbody className="divide-y divide-slate-800/50">
+              {stats.operators.map((op,i)=>{const gain=op.theoHours-op.realHours;const prod=op.realHours>0?(op.theoHours/op.realHours)*100:0;return(<tr key={i} className="hover:bg-slate-800/30"><td className="px-8 py-5"><div className="flex items-center gap-3"><div className="h-8 w-8 rounded-full flex items-center justify-center font-black text-[10px]" style={{backgroundColor:getOperatorColor(op.name,op.color)}}>{op.name.substring(0,2)}</div><span className="text-sm font-black text-white uppercase">{op.name}</span></div></td><td className="px-4 py-5 text-center font-black text-slate-300">{op.completedCount}</td><td className={`px-4 py-5 text-center font-black ${gain>=0?'text-emerald-500':'text-red-500'}`}>{gain>0?'+':''}{gain.toFixed(1)}H</td><td className="px-8 py-5 text-right"><div className="flex flex-col items-end gap-1.5"><span className={`text-xs font-black ${prod>=100?'text-emerald-400':'text-amber-500'}`}>{Math.round(prod)}%</span><div className="w-24 bg-slate-800 rounded-full h-1"><div className={`h-full ${prod>=100?'bg-emerald-500':'bg-amber-500'}`} style={{width:`${Math.min(100,prod)}%`}}></div></div></div></td></tr>);})}
+            </tbody>
+          </table></div>
+        </div>
+      </div>
+      <div className="p-10 bg-slate-900/80 border-t border-slate-800 flex justify-center"><button onClick={onClose} className="px-24 py-5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-black rounded-3xl transition-all shadow-2xl uppercase tracking-widest active:scale-95">Retour au Planning</button></div>
+    </div>
+  </div>);
+};
+
+const DesignModal=({isOpen,onClose,folders,onSave,onDelete})=>{
+  const[isAdding,setIsAdding]=useState(false);const[editingId,setEditingId]=useState(null);const[search,setSearch]=useState('');
+  const[designers,setDesigners]=useState(['LUDOVIC','JULIEN','JOAO','CHRISTOPHE']);const[salespeople,setSalespeople]=useState(['JULIEN','GUILLAUME','CHARLES']);
+  const[designerName,setDesignerName]=useState('');const[receptionDate,setReceptionDate]=useState(new Date().toISOString().split('T')[0]);
+  const[transmissionDate,setTransmissionDate]=useState(new Date().toISOString().split('T')[0]);const[amount,setAmount]=useState('');const[client,setClient]=useState('');
+  const[salesperson,setSalesperson]=useState('');const[returnDate,setReturnDate]=useState('');const[furnitureCount,setFurnitureCount]=useState('');
+  const[shippingDate,setShippingDate]=useState('');const[problems,setProblems]=useState('');const[status,setStatus]=useState('proforma');
+  useEffect(()=>{if(!editingId&&isOpen){setDesignerName(designers[0]||'');setSalesperson(salespeople[0]||'');}},[isOpen,designers,salespeople,editingId]);
+  const ff=folders.filter(f=>f.client.toLowerCase().includes(search.toLowerCase())||f.designerName.toLowerCase().includes(search.toLowerCase())).sort((a,b)=>new Date(b.receptionDate)-new Date(a.receptionDate));
+  const resetForm=()=>{setDesignerName(designers[0]||'');setReceptionDate(new Date().toISOString().split('T')[0]);setTransmissionDate(new Date().toISOString().split('T')[0]);setAmount('');setClient('');setSalesperson(salespeople[0]||'');setReturnDate('');setFurnitureCount('');setShippingDate('');setProblems('');setStatus('proforma');setEditingId(null);};
+  const handleEdit=(f)=>{setEditingId(f.id);setDesignerName(f.designerName);setReceptionDate(f.receptionDate);setTransmissionDate(f.transmissionDate);setAmount(f.amount);setClient(f.client);setSalesperson(f.salesperson);setReturnDate(f.returnDate);setFurnitureCount(f.furnitureCount);setShippingDate(f.shippingDate);setProblems(f.problems);setStatus(f.status);setIsAdding(true);};
+  const handleSubmit=(e)=>{e.preventDefault();const folder={id:editingId||`D-${Date.now()}`,designerName,receptionDate,transmissionDate,amount:Number(amount),client:client.toUpperCase(),salesperson,returnDate,furnitureCount:Number(furnitureCount),shippingDate,problems,status};onSave(folder);setIsAdding(false);resetForm();};
+  if(!isOpen)return null;
+  return(<div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[1100] p-4 backdrop-blur-xl">
+    <div className="bg-[#0f172a] rounded-[2.5rem] border border-slate-700 w-full max-w-7xl max-h-[95vh] overflow-hidden flex flex-col shadow-2xl">
+      <div className="flex justify-between items-center px-10 py-8 border-b border-slate-800 bg-slate-900/50 flex-shrink-0">
+        <div className="flex items-center gap-5"><div className="p-4 bg-indigo-500/10 rounded-2xl border border-indigo-500/20"><DraftingIcon className="h-7 w-7 text-indigo-400"/></div><div><h2 className="text-3xl font-black text-white uppercase tracking-tighter">Gestion BE</h2><p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">DOSSIERS DESSINATEURS & COMMERCIAUX</p></div></div>
+        <button onClick={onClose} className="text-slate-500 hover:text-white p-3 hover:bg-slate-800 rounded-full border border-slate-700"><XIcon className="h-8 w-8"/></button>
+      </div>
+      <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
+        <div className="w-80 bg-slate-900/40 border-r border-slate-800 p-8 space-y-6">
+          <button onClick={()=>{resetForm();setIsAdding(true);}} className="w-full py-5 bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] font-black rounded-2xl transition-all shadow-xl uppercase tracking-widest flex items-center justify-center gap-3"><PlusIcon className="h-5 w-5"/> NOUVEAU DOSSIER</button>
+          <div className="p-6 bg-slate-800/30 rounded-3xl border border-slate-700/50 text-center"><p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">TOTAL DOSSIERS</p><p className="text-3xl font-black text-white">{folders.length}</p></div>
+        </div>
+        <div className="flex-1 flex flex-col min-w-0">
+          {isAdding?(
+            <form onSubmit={handleSubmit} className="p-12 space-y-8 overflow-y-auto scrollbar-hide">
+              <div className="grid grid-cols-2 gap-8">
+                <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">DESSINATEUR *</label><select required value={designerName} onChange={e=>setDesignerName(e.target.value)} className="w-full bg-slate-900/50 border border-slate-700 rounded-2xl p-4 text-sm text-white font-bold uppercase outline-none">{designers.map(d=><option key={d} value={d}>{d}</option>)}</select></div>
+                <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">CLIENT *</label><input required value={client} onChange={e=>setClient(e.target.value.toUpperCase())} className="w-full bg-slate-900/50 border border-slate-700 rounded-2xl p-4 text-sm text-white font-bold outline-none"/></div>
+              </div>
+              <div className="grid grid-cols-2 gap-8">
+                <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">COMMERCIAL</label><select value={salesperson} onChange={e=>setSalesperson(e.target.value)} className="w-full bg-slate-900/50 border border-slate-700 rounded-2xl p-4 text-sm text-white font-bold uppercase outline-none">{salespeople.map(s=><option key={s} value={s}>{s}</option>)}</select></div>
+                <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">EXPÉDITION</label><input type="date" value={shippingDate} onChange={e=>setShippingDate(e.target.value)} className="w-full bg-slate-900/50 border border-slate-700 rounded-2xl p-4 text-sm text-white outline-none"/></div>
+              </div>
+              <div className="flex gap-3">
+                {['proforma','tech','prepare','shipped'].map(s=>(<button key={s} type="button" onClick={()=>setStatus(s)} className={`flex-1 py-4 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${status===s?'bg-indigo-600 border-indigo-400 text-white':'bg-slate-900 border-slate-800 text-slate-500'}`}>{s==='tech'?'TECH / BE':s==='prepare'?'À PRÉPARER':s==='shipped'?'EXPÉDIÉ':s}</button>))}
+              </div>
+              <div className="flex gap-4 pt-6">
+                <button type="button" onClick={()=>{setIsAdding(false);resetForm();}} className="px-10 py-5 border border-slate-700 text-slate-400 text-[11px] font-black rounded-2xl uppercase hover:bg-slate-800 transition-all">ANNULER</button>
+                <button type="submit" className="flex-1 py-5 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-2xl uppercase tracking-widest shadow-2xl active:scale-95">ENREGISTRER</button>
+              </div>
+            </form>
+          ):(
+            <div className="flex flex-1 flex-col overflow-hidden">
+              <div className="p-8 border-b border-slate-800 flex justify-between items-center bg-slate-900/20">
+                <div className="relative w-80"><SearchIcon className="absolute left-4 top-3 h-4 w-4 text-slate-500"/><input value={search} onChange={e=>setSearch(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2.5 pl-12 pr-6 text-xs text-white outline-none" placeholder="Chercher dossier..."/></div>
+              </div>
+              <div className="flex-1 overflow-y-auto p-10 grid grid-cols-2 gap-6 scrollbar-hide">
+                {ff.map(f=>(<div key={f.id} onClick={()=>handleEdit(f)} className="bg-slate-900/40 border border-slate-800 rounded-3xl p-6 hover:bg-slate-800/60 transition-all cursor-pointer group">
+                  <div className="flex justify-between items-start mb-6"><div><h4 className="text-xl font-black text-white uppercase tracking-tighter">{f.client}</h4><p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-1">{f.designerName} • {f.salesperson}</p></div>
+                  <div className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase border ${f.status==='shipped'?'bg-blue-600/20 border-blue-500 text-blue-400':f.status==='prepare'?'bg-emerald-600/20 border-emerald-500 text-emerald-400':'bg-slate-800 border-slate-700 text-slate-500'}`}>{f.status==='shipped'?'EXPÉDIÉ':f.status==='prepare'?'À PRÉPARER':f.status==='tech'?'TECH / BE':f.status}</div></div>
+                  <div className="flex justify-between items-center pt-4 border-t border-slate-800/50"><span className="text-[10px] font-black text-slate-600">CRÉÉ LE {new Date(f.receptionDate).toLocaleDateString()}</span><button onClick={(e)=>{e.stopPropagation();onDelete(f.id);}} className="opacity-0 group-hover:opacity-100 p-2 text-slate-600 hover:text-red-500"><TrashIcon className="h-5 w-5"/></button></div>
+                </div>))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  </div>);
+};
+
+const Chatbot=({messages,onSendMessage,onRestoreChat,isBotLoading})=>{
+  const[isOpen,setIsOpen]=useState(false);const[inputValue,setInputValue]=useState('');const[isListening,setIsListening]=useState(false);
+  const messagesEndRef=useRef(null);const recognitionRef=useRef(null);
+  const SpeechRec=window.SpeechRecognition||window.webkitSpeechRecognition;
+  useEffect(()=>{if(isOpen)messagesEndRef.current?.scrollIntoView({behavior:"smooth"});},[messages,isOpen]);
+  useEffect(()=>{
+    if(!SpeechRec)return;const rec=new SpeechRec();rec.continuous=false;rec.lang='fr-FR';rec.interimResults=false;
+    rec.onresult=(e)=>{setInputValue(p=>p?`${p} ${e.results[e.results.length-1][0].transcript}`:e.results[e.results.length-1][0].transcript);setIsListening(false);};
+    rec.onerror=()=>setIsListening(false);rec.onend=()=>setIsListening(false);recognitionRef.current=rec;
+  },[]);
+  const handleSend=()=>{if(inputValue.trim()){onSendMessage(inputValue);setInputValue('');}};
+  const handleKeyPress=(e)=>{if(e.key==='Enter'&&!isBotLoading)handleSend();};
+  const toggleListen=()=>{if(!recognitionRef.current)return;if(isListening)recognitionRef.current.stop();else{recognitionRef.current.start();setIsListening(true);}};
+  return(<>
+    <div className={`fixed bottom-6 right-6 z-50 transition-transform ${isOpen?'scale-0':'scale-100'}`}>
+      <button onClick={()=>setIsOpen(true)} className="p-4 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700"><ChatBotIcon className="h-8 w-8"/></button>
+    </div>
+    <div className={`fixed bottom-6 right-6 w-96 h-[580px] flex flex-col bg-gray-800/90 backdrop-blur-md rounded-2xl shadow-2xl z-50 transition-all duration-300 ${isOpen?'opacity-100 translate-y-0':'opacity-0 translate-y-10 pointer-events-none'}`}>
+      <div className="flex items-center justify-between p-4 border-b border-gray-700 flex-shrink-0">
+        <div className="flex items-center gap-2"><SparklesIcon className="h-6 w-6 text-blue-400"/><h3 className="text-lg font-bold text-white">PlanifAI</h3></div>
+        <div className="flex items-center gap-2">
+          <button onClick={onRestoreChat} className="text-[10px] font-black text-blue-400 hover:text-blue-300 uppercase px-2 py-1 border border-blue-400/30 rounded-lg">Restore</button>
+          <button onClick={()=>setIsOpen(false)} className="text-gray-400 hover:text-white"><XIcon/></button>
+        </div>
+      </div>
+      <div className="flex-1 p-4 overflow-y-auto space-y-4">
+        {messages.map((msg,i)=>(<div key={i} className={`flex items-end gap-2 ${msg.sender==='user'?'justify-end':'justify-start'}`}>
+          {msg.sender==='bot'&&<div className="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center flex-shrink-0"><ChatBotIcon className="h-5 w-5 text-white"/></div>}
+          <div className={`max-w-xs rounded-2xl px-4 py-2 text-white ${msg.sender==='user'?'bg-blue-600 rounded-br-none':'bg-gray-700 rounded-bl-none'}`}>
+            {msg.isLoading?<div className="flex items-center space-x-1"><span className="h-1.5 w-1.5 bg-white rounded-full animate-bounce"></span><span className="h-1.5 w-1.5 bg-white rounded-full animate-bounce" style={{animationDelay:'.15s'}}></span><span className="h-1.5 w-1.5 bg-white rounded-full animate-bounce" style={{animationDelay:'.3s'}}></span></div>:<p className="text-sm whitespace-pre-wrap">{msg.text}</p>}
+          </div>
+        </div>))}
+        <div ref={messagesEndRef}/>
+      </div>
+      <div className="p-4 border-t border-gray-700 flex-shrink-0">
+        <div className="relative">
+          <input type="text" value={inputValue} onChange={e=>setInputValue(e.target.value)} onKeyPress={handleKeyPress} placeholder="Demandez quelque chose..." className="w-full bg-gray-700 rounded-full py-2 pl-4 pr-24 text-sm text-gray-200 placeholder-gray-400 focus:ring-2 focus:ring-blue-500 outline-none" disabled={isBotLoading}/>
+          <div className="absolute inset-y-0 right-0 flex items-center">
+            {SpeechRec&&<button type="button" onClick={toggleListen} className={`w-10 h-full flex items-center justify-center ${isListening?'text-red-500':'text-gray-400 hover:text-white'}`}><MicrophoneIcon/></button>}
+            <button onClick={handleSend} disabled={isBotLoading||!inputValue.trim()} className="w-10 h-full flex items-center justify-center text-blue-400 hover:text-blue-200 disabled:text-gray-500"><SendIcon/></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </>);
+};
+
+const Scheduler=({operators,tasks,onEditTask,onDeleteTask,onMoveTask,movingTaskId,setMovingTaskId,viewDate,viewWeeks,searchQuery,isReadOnly})=>{
+  const containerRef=useRef(null);
+  const[currentTime,setCurrentTime]=useState(new Date());
+  const[hoverX,setHoverX]=useState(null);const[hoverInfo,setHoverInfo]=useState(null);
+  const[containerWidth,setContainerWidth]=useState(window.innerWidth-300);
+  useEffect(()=>{if(!containerRef.current)return;const ob=new ResizeObserver(e=>{for(const en of e)setContainerWidth(en.contentRect.width);});ob.observe(containerRef.current);return()=>ob.disconnect();},[]);
+  useEffect(()=>{const t=setInterval(()=>setCurrentTime(new Date()),60000);return()=>clearInterval(t);},[]);
+  const totalGridHeight=useMemo(()=>operators.length*OPERATOR_ROW_HEIGHT,[operators.length]);
+  const BASE_DAY_WIDTH=useMemo(()=>{const wc=viewWeeks==='all'?4:Number(viewWeeks);const avail=containerWidth-SIDEBAR_WIDTH-20;const calc=avail/(5.5*wc);return Math.max(calc,wc===1?120:80);},[containerWidth,viewWeeks]);
+  const{allDaysGrid,dayOffsets,totalWidth}=useMemo(()=>{
+    const wc=viewWeeks==='all'?8:Number(viewWeeks);const sow=getStartOfWeek(viewDate);const grid=[];const offsets={};let cx=0;
+    for(let i=0;i<wc*7;i++){const day=addDays(sow,i);grid.push(day);offsets[day.toDateString()]=cx;const we=day.getDay()===0||day.getDay()===6;cx+=we?Math.max(40,BASE_DAY_WIDTH*.25):BASE_DAY_WIDTH;}
+    return{allDaysGrid:grid,dayOffsets:offsets,totalWidth:cx};
+  },[viewDate,viewWeeks,BASE_DAY_WIDTH]);
+  const getTimeFromX=(x)=>{
+    const ax=x-SIDEBAR_WIDTH;let targetDay=null,offsetInDay=0;
+    for(const day of allDaysGrid){const sx=dayOffsets[day.toDateString()];const we=day.getDay()===0||day.getDay()===6;const w=we?Math.max(40,BASE_DAY_WIDTH*.25):BASE_DAY_WIDTH;if(ax>=sx&&ax<sx+w){targetDay=new Date(day);offsetInDay=ax-sx;break;}}
+    if(!targetDay)return null;
+    const cap=getWorkHoursForDay(targetDay);if(cap===0)return{day:targetDay,finalDate:targetDay,timeStr:"--:--"};
+    const pxH=BASE_DAY_WIDTH/cap;const fd=getClockTimeFromWorkHours(targetDay,Math.min(cap,offsetInDay/pxH));
+    return{day:targetDay,finalDate:fd,timeStr:`${fd.getHours().toString().padStart(2,'0')}H${fd.getMinutes().toString().padStart(2,'0')}`};
+  };
+  const handleMouseMove=(e)=>{const rect=e.currentTarget.getBoundingClientRect();const x=e.clientX-rect.left+e.currentTarget.scrollLeft;setHoverX(x);const info=getTimeFromX(x);if(info)setHoverInfo(info);};
+  const handleGridClick=(e,opId)=>{
+    if(!movingTaskId||isReadOnly||!hoverInfo)return;
+    const[taskId,sourceOpId]=movingTaskId.split('::');const movingTask=tasks.find(t=>t.id===taskId);if(!movingTask)return;
+    const opTasks=tasks.filter(t=>t.operatorIds.includes(opId)&&t.id!==taskId);
+    let finalStart=hoverInfo.finalDate;
+    const pred=opTasks.filter(t=>calculateTaskEnd(t).getTime()<=hoverInfo.finalDate.getTime()+36e5).sort((a,b)=>calculateTaskEnd(b).getTime()-calculateTaskEnd(a).getTime())[0];
+    if(pred){finalStart=calculateTaskEnd(pred);}else{const succ=opTasks.filter(t=>new Date(t.start).getTime()>=hoverInfo.finalDate.getTime()-36e5).sort((a,b)=>new Date(a.start)-new Date(b.start))[0];if(succ){const dur=getOperatorDuration(movingTask,sourceOpId||opId);finalStart=calculateTaskStart(new Date(succ.start),dur);}}
+    onMoveTask(taskId,finalStart,opId,sourceOpId);setMovingTaskId(null);setHoverX(null);
+  };
+  const redLinePos=useMemo(()=>{const dk=currentTime.toDateString();if(dayOffsets[dk]===undefined)return null;const cap=getWorkHoursForDay(currentTime);if(cap===0)return null;const pxH=BASE_DAY_WIDTH/cap;return dayOffsets[dk]+SIDEBAR_WIDTH+(getWorkHoursSinceStart(currentTime)*pxH);},[currentTime,dayOffsets,BASE_DAY_WIDTH]);
+  const allSegments=useMemo(()=>{
+    const segs=[];const q=searchQuery?searchQuery.toLowerCase():'';
+    const dt=((!searchQuery||searchQuery.length<2)?tasks:tasks.filter(t=>t.client.toLowerCase().includes(q)||(t.orderNumber||'').toString().toLowerCase().includes(q)));
+    dt.forEach(task=>{
+      task.operatorIds.forEach(opId=>{
+        const opStartStr=task.operatorStarts?task.operatorStarts[opId]:null;
+        let cs=opStartStr?new Date(opStartStr):new Date(task.start);cs.setSeconds(0,0);
+        const totDur=(task.status==='completed'&&task.realDuration!=null?task.realDuration:task.duration);
+        let left=getOperatorDuration({...task,duration:totDur},opId);
+        let isFirst=true;let safety=0;
+        while(left>0.005&&safety<1000){
+          safety++;const cap=getWorkHoursForDay(cs);
+          if(cap===0){cs.setDate(cs.getDate()+1);cs.setHours(8,0,0,0);continue;}
+          const wec=getWorkEndHour(cs);const lt=new Date(cs);lt.setHours(wec.hour,wec.minute,0,0);
+          const sos=new Date(cs);if(sos.getTime()>=lt.getTime()){cs.setDate(cs.getDate()+1);cs.setHours(8,0,0,0);if(cs.getDay()===5)cs.setHours(8,30,0,0);continue;}
+          const avail=getWorkHoursInRange(sos,lt);const wh=Math.min(left,avail);
+          const offDay=dayOffsets[cs.toDateString()];
+          if(offDay!==undefined&&wh>0.005){const pxH=BASE_DAY_WIDTH/cap;const sx=getWorkHoursSinceStart(sos)*pxH;segs.push({opId,left:offDay+sx+SIDEBAR_WIDTH,width:Math.max(2,wh*pxH),taskId:task.id,taskRef:task,isFirst,workedHoursInSeg:wh});}
+          left-=wh;isFirst=false;if(left<0.005)left=0;
+          if(left>0){cs.setDate(cs.getDate()+1);cs.setHours(8,0,0,0);if(cs.getDay()===5)cs.setHours(8,30,0,0);}
+        }
+      });
+    });
+    return segs;
+  },[tasks,searchQuery,dayOffsets,BASE_DAY_WIDTH]);
+  return(<div ref={containerRef} className="relative bg-[#0f172a] overflow-auto h-full scrollbar-thin" onMouseMove={handleMouseMove} onMouseLeave={()=>setHoverX(null)}>
+    <div style={{width:`${totalWidth+SIDEBAR_WIDTH}px`,minHeight:'100%'}} className="relative flex flex-col">
+      <div className="sticky top-0 z-40 bg-[#0f172a] flex border-b-2 border-slate-700/80" style={{height:'110px'}}>
+        <div className="sticky left-0 z-50 bg-[#1e293b] border-r-2 border-slate-700 flex items-center justify-center text-[11px] font-black text-slate-400 uppercase tracking-[0.3em]" style={{width:`${SIDEBAR_WIDTH}px`}}>Monteurs</div>
+        {allDaysGrid.map(day=>{const isToday=day.toDateString()===new Date().toDateString();const isWE=day.getDay()===0||day.getDay()===6;const isWed=day.getDay()===3;const wn=getWeekNumber(day);
+          return(<div key={day.toISOString()} className={`flex-shrink-0 text-center border-r-2 border-slate-800 flex flex-col justify-end pb-4 relative ${isToday?'bg-blue-600/10':isWE?'bg-black/30':'hover:bg-slate-800/20'}`} style={{width:isWE?Math.max(40,BASE_DAY_WIDTH*.25):BASE_DAY_WIDTH}}>
+            {isToday&&<div className="absolute top-0 left-0 right-0 h-1 bg-blue-500" style={{boxShadow:'0 0 15px rgba(59,130,246,.8)'}}/>}
+            {isWed&&<div className="absolute top-2 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5"><span className="bg-blue-600/90 text-white text-[10px] font-black px-3 py-1.5 rounded-xl border border-blue-400/50 uppercase shadow-lg">S{wn}</span><span className="bg-slate-800/90 text-slate-300 text-[9px] font-black px-2.5 py-1.5 rounded-xl border border-slate-600/50 uppercase shadow-lg whitespace-nowrap">{day.toLocaleDateString('fr-FR',{month:'short'}).toUpperCase()} {day.getFullYear()}</span></div>}
+            <div className="flex flex-col items-center justify-center px-1">
+              <span className={`text-[10px] font-black uppercase tracking-widest mb-0.5 truncate w-full text-center ${isToday?'text-blue-400':'text-slate-400'}`}>{getDayName(day)}</span>
+              <div className={`text-2xl font-black leading-none ${isToday?'text-white':'text-slate-200'}`}>{getDayOfMonth(day)}</div>
+            </div>
+          </div>);
+        })}
+      </div>
+      <div className="relative flex-1" style={{height:`${totalGridHeight}px`}}>
+        {allDaysGrid.map(day=>{const we=day.getDay()===0||day.getDay()===6,fri=day.getDay()===5;if(we||fri)return null;const cap=getWorkHoursForDay(day);const pxH=BASE_DAY_WIDTH/cap;return(<div key={`l-${day.toISOString()}`} className="absolute top-0 bottom-0 bg-black/40 z-[1] border-x border-white/5 flex items-center justify-center overflow-hidden" style={{left:`${dayOffsets[day.toDateString()]+SIDEBAR_WIDTH+4*pxH}px`,width:`${pxH}px`}}><span className="rotate-90 text-[8px] font-black text-slate-700 uppercase tracking-widest whitespace-nowrap">PAUSE</span></div>);})}
+        {allDaysGrid.map(day=><div key={`v-${day.toISOString()}`} className="grid-line-v" style={{left:`${dayOffsets[day.toDateString()]+SIDEBAR_WIDTH}px`,height:'100%'}}/>)}
+        {movingTaskId&&hoverX&&hoverX>SIDEBAR_WIDTH&&(<div className="absolute top-0 bottom-0 w-[2.5px] bg-blue-500 z-[48] pointer-events-none" style={{left:`${hoverX}px`,height:'100%',boxShadow:'0 0 15px rgba(59,130,246,.6)'}}><div className="absolute top-0 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-4 py-2 rounded-b-2xl text-[11px] font-black shadow-2xl whitespace-nowrap border-x border-b border-blue-400">{hoverInfo?.timeStr}</div></div>)}
+        {operators.map((op,idx)=>(<div key={`row-${op.id}`} className="absolute left-0 right-0" style={{top:`${idx*OPERATOR_ROW_HEIGHT}px`,height:`${OPERATOR_ROW_HEIGHT}px`}}><div className="grid-line-h w-full" style={{top:'100%'}}/>{movingTaskId&&<div className="absolute inset-0 bg-blue-500/5 hover:bg-blue-600/10 cursor-crosshair z-[45]" onClick={(e)=>handleGridClick(e,op.id)}/>}</div>))}
+        {redLinePos&&!movingTaskId&&(<div className="absolute top-0 bottom-0 w-[2px] bg-red-600 z-[35]" style={{left:`${redLinePos}px`,height:'100%',boxShadow:'0 0 10px rgba(220,38,38,.5)'}}><div className="absolute top-0 left-1/2 -translate-x-1/2 bg-red-600 text-[10px] font-black text-white px-2 py-1 rounded shadow-lg whitespace-nowrap border border-red-400">{currentTime.getHours()}H{currentTime.getMinutes().toString().padStart(2,'0')}</div></div>)}
+        <div className="sticky left-0 z-30 bg-[#1e293b] border-r-2 border-slate-700 shadow-2xl h-full" style={{width:`${SIDEBAR_WIDTH}px`}}>
+          {operators.map((op,idx)=>{
+            const opTasks=tasks.filter(t=>t.operatorIds.includes(op.id)&&t.client!=='CONGES');
+            const done=opTasks.filter(t=>t.status==='completed').length;
+            const inProg=opTasks.filter(t=>t.status==='in_progress').length;
+            const planned=opTasks.filter(t=>t.status==='planned').length;
+            const totalH=opTasks.reduce((s,t)=>s+getOperatorDuration(t,op.id),0);
+            return(<div key={op.id} className="absolute flex items-center px-3 border-b border-slate-700/40 w-full group/op cursor-default" style={{top:idx*OPERATOR_ROW_HEIGHT,height:OPERATOR_ROW_HEIGHT}}>
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <div className="w-8 h-8 rounded-full border border-white/10 flex items-center justify-center font-black text-[9px] text-white shadow-xl flex-shrink-0" style={{backgroundColor:getOperatorColor(op.name,op.color)}}>{op.name.substring(0,3).toUpperCase()}</div>
+                <span className="text-[11px] font-black text-white uppercase tracking-tight flex-1 truncate">{op.name}</span>
+              </div>
+              {/* Tooltip stats au survol */}
+              <div className="absolute left-full top-1/2 -translate-y-1/2 ml-3 w-48 bg-slate-900 border border-slate-700 rounded-2xl p-4 shadow-2xl opacity-0 group-hover/op:opacity-100 pointer-events-none transition-all z-[500]">
+                <div className="flex items-center gap-2 mb-3 pb-2 border-b border-slate-800">
+                  <div className="w-3 h-3 rounded-full flex-shrink-0" style={{backgroundColor:getOperatorColor(op.name,op.color)}}/>
+                  <span className="text-[11px] font-black text-white uppercase truncate">{op.name}</span>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex justify-between"><span className="text-[9px] text-slate-500 uppercase font-bold">Total commandes</span><span className="text-[10px] font-black text-white">{opTasks.length}</span></div>
+                  <div className="flex justify-between"><span className="text-[9px] text-emerald-500 uppercase font-bold">✓ Terminées</span><span className="text-[10px] font-black text-emerald-400">{done}</span></div>
+                  <div className="flex justify-between"><span className="text-[9px] text-blue-400 uppercase font-bold">⟳ En cours</span><span className="text-[10px] font-black text-blue-400">{inProg}</span></div>
+                  <div className="flex justify-between"><span className="text-[9px] text-slate-400 uppercase font-bold">○ Planifiées</span><span className="text-[10px] font-black text-slate-300">{planned}</span></div>
+                  <div className="pt-1 border-t border-slate-800 flex justify-between"><span className="text-[9px] text-amber-500 uppercase font-bold">⏱ Total heures</span><span className="text-[10px] font-black text-amber-400">{totalH.toFixed(1)}H</span></div>
+                </div>
+              </div>
+            </div>);
+          })}
+        </div>
+        {/* Regroupement des segments en UN SEUL PAD par commande+opérateur */}
+        {Object.values(allSegments.reduce((acc,seg)=>{const key=`${seg.taskId}::${seg.opId}`;if(!acc[key])acc[key]={...seg,totalHours:0};acc[key].totalHours+=seg.workedHoursInSeg;acc[key].right=Math.max(acc[key].right||0,seg.left+seg.width);acc[key].left=Math.min(acc[key].left,seg.left);return acc;},{})).map((merged)=>(
+          <TaskCard key={`${merged.taskId}-${merged.opId}`} task={merged.taskRef}
+            onClick={()=>onEditTask(merged.taskRef)} onMoveClick={()=>{if(!isReadOnly)setMovingTaskId(`${merged.taskId}::${merged.opId}`);}} onDelete={()=>onDeleteTask(merged.taskId)}
+            segmentHours={merged.totalHours} isFirstSegment={true} searchQuery={searchQuery}
+            style={{top:`${operators.findIndex(op=>op.id===merged.opId)*OPERATOR_ROW_HEIGHT+10}px`,left:`${merged.left}px`,width:`${merged.right-merged.left}px`,height:`${OPERATOR_ROW_HEIGHT-20}px`,zIndex:movingTaskId===`${merged.taskId}::${merged.opId}`?100:10,opacity:movingTaskId===`${merged.taskId}::${merged.opId}`?.3:1}}
+          />
+        ))}
+      </div>
+    </div>
+  </div>);
+};
+
+const App=()=>{
+  const JSONBIN_ID='69a6f3b8d0ea881f40eadf64';
+  const JSONBIN_KEY='$2a$10$2iAiPcqK8YJB/1FxoNt85eu6sLrUTHzLSvQWHqs6JhOiENK2nRUea';
+  const JSONBIN_URL=`https://api.jsonbin.io/v3/b/${JSONBIN_ID}`;
+
+  const[isReadOnly,setIsReadOnly]=useState(true);const[searchQuery,setSearchQuery]=useState('');
+  const[viewWeeks,setViewWeeks]=useState(1);const[viewDate,setViewDate]=useState(getStartOfWeek(new Date()));
+  const[isSidebarOpen,setIsSidebarOpen]=useState(true);
+  const[isModalOpen,setIsModalOpen]=useState(false);const[isDesignModalOpen,setIsDesignModalOpen]=useState(false);const[isStatsOpen,setIsStatsOpen]=useState(false);
+  const[editingTask,setEditingTask]=useState(null);const[movingTaskId,setMovingTaskId]=useState(null);
+  const[serverStatus,setServerStatus]=useState('unknown');
+  const[geminiApiKey,setGeminiApiKey]=useState(()=>localStorage.getItem('trilogiq_gemini_key')||'');const[showApiInput,setShowApiInput]=useState(false);
+  const[operators,setOperators]=useState(()=>{
+    const s=localStorage.getItem('trilogiq_operators');
+    const ops=s?JSON.parse(s):initialOperators;
+    return ops.map(op=>({...op,name:op.name==='CHRISTAM'?'CHRISTIAN':op.name}));
+  });
+  const[newOpName,setNewOpName]=useState('');const[newOpRole,setNewOpRole]=useState('Monteur');
+  const[tasks,setTasks]=useState(()=>{const s=localStorage.getItem('trilogiq_tasks_v2');if(!s)return[];try{return JSON.parse(s).map(t=>({...t,start:new Date(t.start),operatorStarts:t.operatorStarts||{}}));}catch(e){return[];}});
+  const[designFolders,setDesignFolders]=useState(()=>{const s=localStorage.getItem('trilogiq_design_folders');return s?JSON.parse(s):[];});
+  const[messages,setMessages]=useState([{sender:'bot',text:'Interface TRILOGIQ restaurée. Le flux de production est prêt.',timestamp:new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}]);
+  const[isBotLoading,setIsBotLoading]=useState(false);const[saveStatus,setSaveStatus]=useState('idle');const[history,setHistory]=useState([]);
+  const[designers,setDesigners]=useState(()=>{const s=localStorage.getItem('trilogiq_designers');return s?JSON.parse(s):['LUDOVIC','JULIEN','CHRISTOPHE','JOAO'];});
+  const[salespeople,setSalespeople]=useState(()=>{const s=localStorage.getItem('trilogiq_salespeople');return s?JSON.parse(s):['GUILLAUME HODE','JULIEN ALACRON','CHARLES BRAND'];});
+
+  // Chargement depuis JSONBin
+  useEffect(()=>{
+    fetch(JSONBIN_URL+'/latest',{headers:{'X-Access-Key':JSONBIN_KEY}})
+      .then(r=>r.json()).then(data=>{
+        const d=data.record;
+        if(!d||!d.tasks){setServerStatus('ok');return;}
+        if(d.tasks&&d.tasks.length>0)setTasks(d.tasks.map(t=>({...t,start:new Date(t.start),operatorStarts:t.operatorStarts||{}})));
+        if(d.operators&&d.operators.length>0)setOperators(d.operators.map(op=>({...op,name:op.name==='CHRISTAM'?'CHRISTIAN':op.name})));
+        if(d.designFolders)setDesignFolders(d.designFolders);
+        if(d.designers)setDesigners(d.designers);
+        if(d.salespeople)setSalespeople(d.salespeople);
+        setServerStatus('ok');
+      }).catch(()=>setServerStatus('offline'));
+  },[]);
+
+  // Rafraîchissement toutes les 30s
+  useEffect(()=>{
+    if(serverStatus!=='ok')return;
+    const interval=setInterval(()=>{
+      fetch(JSONBIN_URL+'/latest',{headers:{'X-Access-Key':JSONBIN_KEY}})
+        .then(r=>r.json()).then(data=>{
+          const d=data.record;if(!d||!d.tasks)return;
+          setTasks(d.tasks.map(t=>({...t,start:new Date(t.start),operatorStarts:t.operatorStarts||{}})));
+          if(d.operators)setOperators(d.operators);
+          if(d.designFolders)setDesignFolders(d.designFolders);
+        }).catch(()=>setServerStatus('offline'));
+    },30000);
+    return()=>clearInterval(interval);
+  },[serverStatus]);
+
+  // Sauvegarde localStorage (fallback)
+  useEffect(()=>{localStorage.setItem('trilogiq_tasks_v2',JSON.stringify(tasks));},[tasks]);
+  useEffect(()=>{localStorage.setItem('trilogiq_design_folders',JSON.stringify(designFolders));},[designFolders]);
+  useEffect(()=>{localStorage.setItem('trilogiq_operators',JSON.stringify(operators));},[operators]);
+  useEffect(()=>{localStorage.setItem('trilogiq_designers',JSON.stringify(designers));},[designers]);
+  useEffect(()=>{localStorage.setItem('trilogiq_salespeople',JSON.stringify(salespeople));},[salespeople]);
+  useEffect(()=>{if(geminiApiKey)localStorage.setItem('trilogiq_gemini_key',geminiApiKey);},[geminiApiKey]);
+
+  const realignAllTasks=(allTasks)=>{
+    let ut=[...allTasks];let changed=true;let iter=0;
+    while(changed&&iter<10){changed=false;iter++;
+      operators.forEach(op=>{
+        const ot=ut.filter(t=>t.operatorIds.includes(op.id)).sort((a,b)=>{const sa=a.operatorStarts&&a.operatorStarts[op.id]?new Date(a.operatorStarts[op.id]).getTime():a.start.getTime();const sb=b.operatorStarts&&b.operatorStarts[op.id]?new Date(b.operatorStarts[op.id]).getTime():b.start.getTime();if(isNaN(sa))return 1;if(isNaN(sb))return -1;return sa-sb;});
+        if(ot.length<=1)return;
+        for(let i=1;i<ot.length;i++){
+          const prev=ut.find(t=>t.id===ot[i-1].id)||ot[i-1];const curr=ut.find(t=>t.id===ot[i].id)||ot[i];
+          if(isNaN(prev.start.getTime())||isNaN(curr.start.getTime()))continue;
+          const prevEnd=calculateTaskEnd({...prev,duration:getOperatorDuration(prev,op.id)});
+          const currOpStart=curr.operatorStarts&&curr.operatorStarts[op.id]?new Date(curr.operatorStarts[op.id]):curr.start;
+          if(isNaN(prevEnd.getTime())||isNaN(currOpStart.getTime()))continue;
+          if(Math.abs(currOpStart.getTime()-prevEnd.getTime())>60000){
+            const ci=ut.findIndex(t=>t.id===curr.id);if(ci!==-1){const uc={...ut[ci]};uc.operatorStarts={...(uc.operatorStarts||{}),[op.id]:prevEnd.toISOString()};const allS=Object.values(uc.operatorStarts).map(s=>new Date(s).getTime());const maxS=new Date(Math.max(...allS));if(uc.start.getTime()!==maxS.getTime())uc.start=maxS;ut[ci]=uc;changed=true;}
+          }
+        }
+      });
+    }
+    return ut;
+  };
+
+  const handleSaveTask=(newTask)=>{
+    setTasks(prev=>{
+      historyRef.current=[...historyRef.current,prev];
+      setHistory([...historyRef.current]);
+      const idx=prev.findIndex(t=>t.id===newTask.id);let nt=[...prev];if(idx!==-1)nt[idx]=newTask;else nt.push(newTask);return realignAllTasks(nt);
+    });
+    setIsModalOpen(false);setEditingTask(null);
+  };
+  const handleDeleteTask=(taskId)=>{
+    setTasks(prev=>{
+      historyRef.current=[...historyRef.current,prev];
+      setHistory([...historyRef.current]);
+      return realignAllTasks(prev.filter(t=>t.id!==taskId));
+    });
+  };
+  const historyRef=useRef([]);
+  const handleUndo=useCallback(()=>{
+    if(historyRef.current.length===0)return;
+    const snapshot=historyRef.current[historyRef.current.length-1];
+    historyRef.current=historyRef.current.slice(0,-1);
+    setHistory([...historyRef.current]);
+    setTasks(snapshot.map(t=>({...t,start:new Date(t.start)})));
+  },[]);
+
+  useEffect(()=>{
+    const h=(e)=>{if((e.ctrlKey||e.metaKey)&&e.key==='z'){e.preventDefault();handleUndo();}};
+    document.addEventListener('keydown',h);return()=>document.removeEventListener('keydown',h);
+  },[handleUndo]);
+
+  const handleMoveTask=(id,newDate,newOpId,sourceOpId)=>{
+    setTasks(prev=>{
+      historyRef.current=[...historyRef.current,prev];
+      setHistory([...historyRef.current]);
+      let nt=prev.map(t=>{
+        if(t.id===id){
+          const ut={...t};
+          if(sourceOpId&&newOpId){
+            if(newOpId===sourceOpId){ut.operatorStarts={...(ut.operatorStarts||{}),[sourceOpId]:newDate.toISOString()};}
+            else{ut.operatorIds=ut.operatorIds.filter(o=>o!==sourceOpId);const{[sourceOpId]:rs,...restS}=ut.operatorStarts||{};ut.operatorStarts=restS;const{[sourceOpId]:rd,...restD}=ut.operatorDurations||{};ut.operatorDurations=restD;if(!ut.operatorIds.includes(newOpId))ut.operatorIds.push(newOpId);ut.operatorStarts[newOpId]=newDate.toISOString();if(rd)ut.operatorDurations={...ut.operatorDurations,[newOpId]:rd};}
+            const as=ut.operatorIds.map(o=>ut.operatorStarts&&ut.operatorStarts[o]?new Date(ut.operatorStarts[o]).getTime():ut.start.getTime());if(as.length>0)ut.start=new Date(Math.min(...as));
+          }else{ut.start=newDate;if(newOpId){if(!ut.operatorIds.includes(newOpId))ut.operatorIds=[newOpId];ut.operatorStarts={[newOpId]:newDate.toISOString()};}
+          else{const diff=newDate.getTime()-t.start.getTime();if(ut.operatorStarts){const ns={};Object.entries(ut.operatorStarts).forEach(([k,v])=>{ns[k]=new Date(new Date(v).getTime()+diff).toISOString();});ut.operatorStarts=ns;}}}
+          return ut;
+        }return t;
+      });
+      return realignAllTasks(nt);
+    });
+    setMovingTaskId(null);
+  };
+
+  const handleAddOp=()=>{if(!newOpName.trim())return;const op={id:Date.now().toString(),name:newOpName.toUpperCase(),role:newOpRole,color:`#${Math.floor(Math.random()*16777215).toString(16).padStart(6,'0')}`};setOperators(p=>[...p,op]);setNewOpName('');};
+  const handleResetFlux=()=>{if(window.confirm("⚠️ ALERTE CRITIQUE : Souhaitez-vous vraiment RÉINITIALISER LE FLUX ? Toutes les données du planning seront supprimées.")){setTasks([]);localStorage.removeItem('trilogiq_tasks_v2');}};
+  const handleSave=()=>{
+    setSaveStatus('saving');
+    const payload={tasks:tasks.map(t=>({...t,start:t.start.toISOString()})),operators,designFolders,designers,salespeople,savedAt:new Date().toISOString()};
+    // Sauvegarde localStorage + JSONBin
+    localStorage.setItem('trilogiq_tasks_v2',JSON.stringify(tasks));
+    localStorage.setItem('trilogiq_design_folders',JSON.stringify(designFolders));
+    localStorage.setItem('trilogiq_operators',JSON.stringify(operators));
+    fetch(JSONBIN_URL,{method:'PUT',headers:{'Content-Type':'application/json','X-Access-Key':JSONBIN_KEY},body:JSON.stringify(payload)})
+      .then(r=>r.json()).then(()=>{setSaveStatus('success');setServerStatus('ok');setTimeout(()=>setSaveStatus('idle'),2000);})
+      .catch(()=>{setServerStatus('offline');setSaveStatus('success');setTimeout(()=>setSaveStatus('idle'),2000);});
+  };
+
+  const handleSendMessage=async(text)=>{
+    if(!text.trim())return;const now=new Date();const ts=now.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+    setMessages(p=>[...p,{sender:'user',text,timestamp:ts}]);setIsBotLoading(true);
+    try{
+      if(!geminiApiKey){setMessages(p=>[...p,{sender:'bot',text:"⚠️ Clé API Gemini non configurée. Cliquez sur l'icône ✨ pour la saisir.",timestamp:ts}]);}
+      else{
+        const sys=`Tu es PlanifAI, l'assistant d'atelier TRILOGIQ. Date: ${now.toLocaleString('fr-FR')}. Équipe: ${JSON.stringify(operators.map(o=>o.name))}. Tâches: ${JSON.stringify(tasks.slice(0,10).map(t=>({client:t.client,cmd:t.orderNumber,status:t.status})))}. Réponds brièvement en français.`;
+        const resp=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${geminiApiKey}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:`${sys}\n\nUtilisateur: ${text}`}]}]})});
+        const data=await resp.json();const bt=data.candidates?.[0]?.content?.parts?.[0]?.text||'Désolé, je ne peux pas répondre.';
+        setMessages(p=>[...p,{sender:'bot',text:bt,timestamp:new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}]);
+      }
+    }catch(e){setMessages(p=>[...p,{sender:'bot',text:'Erreur de connexion à Gemini. Vérifiez votre clé API.',timestamp:ts}]);}
+    setIsBotLoading(false);
+  };
+
+  return(
+    <div className="h-screen w-screen bg-[#0f172a] text-gray-200 flex overflow-hidden select-none">
+      <aside style={{width:isSidebarOpen?'240px':'0',minWidth:isSidebarOpen?'240px':'0',height:'100vh',overflow:'hidden',transition:'width .5s,min-width .5s'}} className="bg-[#1e293b] border-r border-slate-800 flex flex-col z-50 shadow-2xl">
+        {isSidebarOpen&&(<>
+          {/* PARTIE HAUTE FIXE - COMPACTE */}
+          <div style={{flexShrink:0,padding:'16px 20px 0 20px'}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'14px'}}>
+              <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+                <img src="data:image/png;base64,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" alt="TRILOGIQ" style={{width:'36px',height:'36px',objectFit:'contain'}}/>
+                <div><div style={{fontSize:'15px',fontWeight:900,color:'white',textTransform:'uppercase',letterSpacing:'0.05em',lineHeight:1}}>ATELIER</div><div style={{fontSize:'9px',fontWeight:900,color:'#3b82f6',textTransform:'uppercase',letterSpacing:'0.3em'}}>TRILOGIQ</div></div>
+              </div>
+              <Clock/>
+            </div>
+            <div style={{display:'flex',flexDirection:'column',gap:'8px',marginBottom:'10px'}}>
+              <button onClick={()=>{setEditingTask(null);setIsModalOpen(true);}} disabled={isReadOnly} style={{width:'100%',padding:'11px',backgroundColor:isReadOnly?'#334155':'#2563eb',color:'white',fontSize:'11px',fontWeight:900,borderRadius:'12px',border:'1px solid rgba(255,255,255,0.1)',cursor:isReadOnly?'not-allowed':'pointer',display:'flex',alignItems:'center',justifyContent:'center',gap:'8px',opacity:isReadOnly?.5:1}}><PlusIcon className="h-4 w-4"/> NOUVELLE COMMANDE</button>
+            </div>
+            <div style={{marginBottom:'8px'}}>
+              <div style={{display:'flex',gap:'6px',marginBottom:'5px'}}>
+                <input type="text" placeholder="NOM DU MONTEUR..." value={newOpName} onChange={e=>setNewOpName(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleAddOp()} style={{flex:1,backgroundColor:'rgba(15,23,42,0.8)',border:'1px solid #334155',borderRadius:'10px',padding:'8px 10px',fontSize:'10px',fontWeight:700,color:'white',outline:'none',textTransform:'uppercase'}}/>
+                <button onClick={handleAddOp} style={{width:'34px',height:'34px',backgroundColor:'#2563eb',border:'none',borderRadius:'10px',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'white',flexShrink:0}}><PlusIcon className="h-4 w-4"/></button>
+              </div>
+              <select value={newOpRole} onChange={e=>setNewOpRole(e.target.value)} style={{width:'100%',backgroundColor:'rgba(15,23,42,0.8)',border:'1px solid #334155',borderRadius:'10px',padding:'6px 10px',fontSize:'10px',fontWeight:900,color:'#94a3b8',textTransform:'uppercase',outline:'none',appearance:'none'}}>
+                <option value="Monteur">MONTEUR</option><option value="Superviseur">SUPERVISEUR</option>
+              </select>
+            </div>
+            <div style={{marginBottom:'8px'}}>
+              <div style={{display:'flex',backgroundColor:'#0f172a',borderRadius:'10px',padding:'3px',border:'1px solid #1e293b'}}>
+                <button onClick={()=>setViewWeeks(1)} style={{flex:1,padding:'5px',fontSize:'9px',fontWeight:900,borderRadius:'8px',border:'none',cursor:'pointer',textTransform:'uppercase',backgroundColor:viewWeeks===1?'#2563eb':'transparent',color:viewWeeks===1?'white':'#64748b'}}>1 SEM.</button>
+                <button onClick={()=>setViewWeeks(2)} style={{flex:1,padding:'5px',fontSize:'9px',fontWeight:900,borderRadius:'8px',border:'none',cursor:'pointer',textTransform:'uppercase',backgroundColor:viewWeeks===2?'#2563eb':'transparent',color:viewWeeks===2?'white':'#64748b'}}>2 SEM.</button>
+              </div>
+            </div>
+            <div style={{fontSize:'10px',fontWeight:900,color:'#475569',textTransform:'uppercase',letterSpacing:'0.2em',marginBottom:'6px',paddingLeft:'2px'}}>ÉQUIPE ({operators.length})</div>
+          </div>
+          {/* LISTE SCROLLABLE */}
+          <div id="ops-list" style={{flex:'1 1 0',overflowY:'auto',overflowX:'hidden',paddingLeft:'24px',paddingRight:'12px',paddingBottom:'8px',scrollbarWidth:'auto',scrollbarColor:'#6366f1 transparent'}}>
+            {operators.map(op=>(<div key={op.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px',marginBottom:'8px',borderRadius:'16px',backgroundColor:'rgba(30,41,59,0.8)',border:'1px solid rgba(71,85,105,0.4)'}}>
+              <div style={{display:'flex',alignItems:'center',gap:'12px',minWidth:0,flex:1}}>
+                <div style={{width:'38px',height:'38px',borderRadius:'50%',backgroundColor:op.color,display:'flex',alignItems:'center',justifyContent:'center',fontSize:'11px',fontWeight:900,color:'white',flexShrink:0,letterSpacing:'0.05em'}}>{op.name.substring(0,3).toUpperCase()}</div>
+                <span style={{fontSize:'13px',fontWeight:800,color:'#e2e8f0',textTransform:'uppercase',letterSpacing:'0.03em',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{op.name}</span>
+              </div>
+              <button onClick={()=>setOperators(p=>p.filter(o=>o.id!==op.id))} title="Supprimer" style={{flexShrink:0,marginLeft:'8px',padding:'6px',borderRadius:'8px',backgroundColor:'rgba(51,65,85,0.8)',border:'1px solid rgba(71,85,105,0.4)',color:'#64748b',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'all .15s'}} onMouseEnter={e=>{e.currentTarget.style.backgroundColor='#dc2626';e.currentTarget.style.color='white';}} onMouseLeave={e=>{e.currentTarget.style.backgroundColor='rgba(51,65,85,0.8)';e.currentTarget.style.color='#64748b';}}><TrashIcon className="h-4 w-4"/></button>
+            </div>))}
+          </div>
+          {/* BAS FIXE */}
+          <div className="flex-shrink-0 px-6 pb-6 pt-3">
+            {/* SAUVEGARDE / RESTAURATION */}
+            <div style={{marginBottom:'10px',display:'flex',gap:'6px'}}>
+              <button onClick={()=>{
+                const backup={version:2,date:new Date().toISOString(),tasks:tasks.map(t=>({...t,start:t.start.toISOString()})),operators,designFolders};
+                const blob=new Blob([JSON.stringify(backup,null,2)],{type:'application/json'});
+                const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+                const d=new Date();a.download=`trilogiq_backup_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}.json`;
+                a.click();URL.revokeObjectURL(a.href);
+              }} title="Sauvegarder toutes les données" style={{flex:1,padding:'10px',backgroundColor:'rgba(99,102,241,.15)',border:'1px solid rgba(99,102,241,.4)',borderRadius:'12px',color:'#818cf8',fontSize:'9px',fontWeight:900,textTransform:'uppercase',cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',gap:'3px'}}
+                onMouseEnter={e=>{e.currentTarget.style.backgroundColor='rgba(99,102,241,.3)';}} onMouseLeave={e=>{e.currentTarget.style.backgroundColor='rgba(99,102,241,.15)';}}>
+                <span style={{fontSize:'16px'}}>💾</span>BACKUP
+              </button>
+              <label title="Restaurer depuis un fichier de sauvegarde" style={{flex:1,padding:'10px',backgroundColor:'rgba(16,185,129,.1)',border:'1px solid rgba(16,185,129,.3)',borderRadius:'12px',color:'#34d399',fontSize:'9px',fontWeight:900,textTransform:'uppercase',cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',gap:'3px'}}
+                onMouseEnter={e=>{e.currentTarget.style.backgroundColor='rgba(16,185,129,.2)';}} onMouseLeave={e=>{e.currentTarget.style.backgroundColor='rgba(16,185,129,.1)';}}>
+                <span style={{fontSize:'16px'}}>📂</span>RESTORE
+                <input type="file" accept=".json" style={{display:'none'}} onChange={e=>{
+                  const file=e.target.files[0];if(!file)return;
+                  const reader=new FileReader();
+                  reader.onload=ev=>{
+                    try{
+                      const data=JSON.parse(ev.target.result);
+                      if(!data.tasks||!data.operators){alert('❌ Fichier invalide.');return;}
+                      if(!window.confirm(`Restaurer la sauvegarde du ${new Date(data.date).toLocaleString('fr-FR')} ?\nCela remplacera toutes les données actuelles.`))return;
+                      setTasks(data.tasks.map(t=>({...t,start:new Date(t.start),operatorStarts:t.operatorStarts||{}})));
+                      setOperators(data.operators);
+                      if(data.designFolders)setDesignFolders(data.designFolders);
+                      alert('✅ Restauration réussie !');
+                    }catch(err){alert('❌ Erreur de lecture du fichier.');}
+                  };
+                  reader.readAsText(file);
+                  e.target.value='';
+                }}/>
+              </label>
+            </div>
+            <button onClick={handleResetFlux} className="w-full py-4 text-[10px] font-black text-amber-500 bg-amber-500/5 border border-amber-500/20 rounded-2xl uppercase tracking-[0.2em] hover:bg-amber-500/10 transition-all">⚡ RÉINITIALISER LE FLUX</button>
+          </div>
+        </>)}
+      </aside>
+      <main className="flex-1 flex flex-col" style={{minWidth:0}}>
+        <header className="h-20 border-b border-slate-800 px-8 flex items-center justify-between bg-slate-900/30 flex-shrink-0">
+          <div className="flex items-center gap-6">
+            <button onClick={()=>setIsSidebarOpen(!isSidebarOpen)} className="p-2 text-slate-500 hover:text-white"><MenuIcon className="h-6 w-6"/></button>
+            <div className="flex bg-slate-950 rounded-xl p-1.5 border border-slate-800">
+              <button onClick={()=>setViewDate(addDays(viewDate,-7))} className="p-2 text-slate-500 hover:text-white"><ChevronLeftIcon className="h-4 w-4"/></button>
+              <button onClick={()=>setViewDate(getStartOfWeek(new Date()))} className="px-6 text-[10px] font-black text-white uppercase">AUJOURD'HUI</button>
+              <button onClick={()=>setViewDate(addDays(viewDate,7))} className="p-2 text-slate-500 hover:text-white"><ChevronRightIcon className="h-4 w-4"/></button>
+            </div>
+            <div className={`flex items-center gap-3 px-5 py-2 rounded-full border ${isReadOnly?'bg-amber-900/10 border-amber-500/30 text-amber-500':'bg-emerald-900/10 border-emerald-500/30 text-emerald-500'}`}>
+              <div className={`w-2 h-2 rounded-full ${isReadOnly?'bg-amber-500':'bg-emerald-500 animate-pulse'}`}/>
+              <span className="text-[9px] font-black uppercase">{isReadOnly?'LECTURE SEULE':'MODE ÉDITION'}</span>
+              <button onClick={()=>setIsReadOnly(!isReadOnly)} className="ml-3 text-[8px] px-3 py-1 rounded-lg font-black bg-white text-slate-900 uppercase">{isReadOnly?'DÉVERROUILLER':'VERROUILLER'}</button>
+            </div>
+          </div>
+          <div className="flex items-center gap-5">
+            <div className="relative"><SearchIcon className="absolute left-4 top-3 h-4 w-4 text-slate-500"/><input type="text" placeholder="Chercher client..." value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} className="bg-slate-950/50 border border-slate-800 rounded-xl py-2.5 pl-12 pr-6 text-xs w-64 outline-none font-bold text-white"/></div>
+            <button onClick={()=>setIsStatsOpen(true)} title="Statistiques & Analyses" style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'3px',padding:'8px 12px',backgroundColor:'rgba(99,102,241,0.15)',border:'1px solid rgba(99,102,241,0.4)',borderRadius:'12px',color:'#818cf8',cursor:'pointer',transition:'all .15s'}} onMouseEnter={e=>{e.currentTarget.style.backgroundColor='rgba(99,102,241,0.3)';e.currentTarget.style.borderColor='#818cf8';e.currentTarget.style.color='white';}} onMouseLeave={e=>{e.currentTarget.style.backgroundColor='rgba(99,102,241,0.15)';e.currentTarget.style.borderColor='rgba(99,102,241,0.4)';e.currentTarget.style.color='#818cf8';}}><ChartBarIcon className="h-5 w-5"/><span style={{fontSize:'8px',fontWeight:900,textTransform:'uppercase',letterSpacing:'0.05em',whiteSpace:'nowrap'}}>STATS</span></button>
+            <button onClick={handleUndo} disabled={history.length===0} title="Annuler la dernière action (Ctrl+Z)" style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'3px',padding:'8px 12px',backgroundColor:history.length>0?'rgba(251,191,36,0.12)':'rgba(30,41,59,0.5)',border:`1px solid ${history.length>0?'rgba(251,191,36,0.4)':'rgba(51,65,85,0.5)'}`,borderRadius:'12px',color:history.length>0?'#fbbf24':'#334155',cursor:history.length>0?'pointer':'not-allowed',transition:'all .15s'}} onMouseEnter={e=>{if(history.length>0){e.currentTarget.style.backgroundColor='rgba(251,191,36,0.25)';e.currentTarget.style.color='white';}}} onMouseLeave={e=>{if(history.length>0){e.currentTarget.style.backgroundColor='rgba(251,191,36,0.12)';e.currentTarget.style.color='#fbbf24';}}}><UndoIcon className="h-5 w-5"/><span style={{fontSize:'8px',fontWeight:900,textTransform:'uppercase',letterSpacing:'0.05em',whiteSpace:'nowrap'}}>ANNULER</span></button>
+            <div className="relative">
+              <button onClick={()=>setShowApiInput(!showApiInput)} className={`p-2.5 border rounded-xl transition-all ${geminiApiKey?'bg-emerald-800/20 border-emerald-700 text-emerald-400':'bg-slate-800/50 border-slate-700 text-slate-400 hover:text-white'}`} title="Configurer Gemini API"><SparklesIcon className="h-5 w-5"/></button>
+              {showApiInput&&(<div className="absolute right-0 top-full mt-2 w-80 bg-[#1e293b] border border-slate-700 rounded-2xl p-4 shadow-2xl z-[1000]">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">CLÉ API GEMINI (PlanifAI)</p>
+                <input type="password" value={geminiApiKey} onChange={e=>setGeminiApiKey(e.target.value)} placeholder="AIzaSy..." className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs text-white outline-none font-mono mb-3"/>
+                <button onClick={()=>setShowApiInput(false)} className="w-full py-2 bg-blue-600 text-white text-[10px] font-black rounded-xl uppercase">Confirmer</button>
+              </div>)}
+            </div>
+            <NotificationBell tasks={tasks}/>
+            {/* Indicateur statut serveur */}
+            {serverStatus==='ok'&&<div style={{display:'flex',alignItems:'center',gap:'5px',padding:'4px 10px',backgroundColor:'rgba(34,197,94,.1)',border:'1px solid rgba(34,197,94,.3)',borderRadius:'10px'}} title="Connecté au serveur réseau"><div style={{width:'7px',height:'7px',borderRadius:'50%',backgroundColor:'#22c55e',boxShadow:'0 0 6px #22c55e'}}></div><span style={{fontSize:'9px',fontWeight:900,color:'#4ade80',textTransform:'uppercase'}}>RÉSEAU</span></div>}
+            {serverStatus==='offline'&&<div style={{display:'flex',alignItems:'center',gap:'5px',padding:'4px 10px',backgroundColor:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.3)',borderRadius:'10px'}} title="Serveur non disponible - mode local"><div style={{width:'7px',height:'7px',borderRadius:'50%',backgroundColor:'#ef4444'}}></div><span style={{fontSize:'9px',fontWeight:900,color:'#f87171',textTransform:'uppercase'}}>HORS LIGNE</span></div>}
+            {serverStatus==='local'&&<div style={{display:'flex',alignItems:'center',gap:'5px',padding:'4px 10px',backgroundColor:'rgba(99,102,241,.1)',border:'1px solid rgba(99,102,241,.3)',borderRadius:'10px'}} title="Mode fichier local"><div style={{width:'7px',height:'7px',borderRadius:'50%',backgroundColor:'#818cf8'}}></div><span style={{fontSize:'9px',fontWeight:900,color:'#a5b4fc',textTransform:'uppercase'}}>LOCAL</span></div>}
+            <button onClick={handleSave} disabled={saveStatus!=='idle'} className={`px-8 py-2.5 rounded-xl font-black text-[10px] uppercase shadow-lg transition-all flex items-center gap-2 ${saveStatus==='success'?'bg-green-500 text-white':saveStatus==='saving'?'bg-emerald-700 text-white/70 cursor-wait':'bg-emerald-600 text-white hover:bg-emerald-500 active:scale-95'}`}>
+              {saveStatus==='saving'?'ENREGISTREMENT...':(saveStatus==='success'?<><CheckCircleIcon className="h-4 w-4"/> SAUVEGARDÉ !</>:<><SaveIcon className="h-4 w-4"/> ENREGISTRER</>)}
+            </button>
+          </div>
+        </header>
+        <div className="flex-1 relative overflow-hidden">
+          <Scheduler operators={operators} tasks={tasks} viewDate={viewDate} viewWeeks={viewWeeks} searchQuery={searchQuery} isReadOnly={isReadOnly}
+            onEditTask={(t)=>{if(!isReadOnly){setEditingTask(t);setIsModalOpen(true);}}} onDeleteTask={handleDeleteTask}
+            onMoveTask={handleMoveTask} movingTaskId={movingTaskId} setMovingTaskId={setMovingTaskId}/>
+        </div>
+      </main>
+      <TaskModal isOpen={isModalOpen} onClose={()=>{setIsModalOpen(false);setEditingTask(null);}} operators={operators} tasks={tasks} taskToEdit={editingTask} onSaveTask={handleSaveTask} designers={designers} setDesigners={setDesigners} salespeople={salespeople} setSalespeople={setSalespeople}/>
+      <DesignModal isOpen={isDesignModalOpen} onClose={()=>setIsDesignModalOpen(false)} folders={designFolders} onSave={(f)=>setDesignFolders(prev=>{const i=prev.findIndex(x=>x.id===f.id);if(i!==-1){const u=[...prev];u[i]=f;return u;}return[...prev,f];})} onDelete={(id)=>setDesignFolders(p=>p.filter(x=>x.id!==id))}/>
+      <DashboardModal isOpen={isStatsOpen} onClose={()=>setIsStatsOpen(false)} tasks={tasks} operators={operators} onUpdateTask={(taskId,patch)=>setTasks(prev=>prev.map(t=>t.id===taskId?{...t,...patch}:t))}/>
+      <Chatbot messages={messages} onSendMessage={handleSendMessage} onRestoreChat={()=>setMessages([{sender:'bot',text:'Interface TRILOGIQ restaurée. Le flux de production est prêt.',timestamp:new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}])} isBotLoading={isBotLoading}/>
+    </div>
+  );
+};
+
+const root=ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App/>);
+</script>
+</body>
+</html>
