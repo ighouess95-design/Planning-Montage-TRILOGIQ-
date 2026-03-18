@@ -286,7 +286,7 @@ const TaskModal=({isOpen,onClose,onSaveTask,operators,tasks,taskToEdit,designers
       if(opTasks.length>0){
         const latest=opTasks.reduce((a,b)=>calculateTaskEnd(a)>calculateTaskEnd(b)?a:b);
         const end=calculateTaskEnd(latest);
-        setStartDate(end.toISOString().split('T')[0]);setStartTime(end.getHours().toString().padStart(2,'0')+':'+end.getMinutes().toString().padStart(2,'0'));
+        setStartDate(end.getFullYear()+'-'+String(end.getMonth()+1).padStart(2,'0')+'-'+String(end.getDate()).padStart(2,'0'));setStartTime(end.getHours().toString().padStart(2,'0')+':'+end.getMinutes().toString().padStart(2,'0'));
         setOpStarts(prev=>({...prev,[opId]:end.toISOString()}));
       }
     }
@@ -899,8 +899,9 @@ const App=()=>{
         if(d.designFolders)setDesignFolders(d.designFolders);
         if(d.designers)setDesigners(d.designers);
         if(d.salespeople)setSalespeople(d.salespeople);
+        hasLoadedRef.current=true;
         setServerStatus('ok');
-      }).catch(()=>setServerStatus('offline'));
+      }).catch(()=>{hasLoadedRef.current=true;setServerStatus('offline');});
   },[]);
 
   // Rafraîchissement toutes les 30s
@@ -925,6 +926,18 @@ const App=()=>{
   useEffect(()=>{localStorage.setItem('trilogiq_designers',JSON.stringify(designers));},[designers]);
   useEffect(()=>{localStorage.setItem('trilogiq_salespeople',JSON.stringify(salespeople));},[salespeople]);
   useEffect(()=>{if(geminiApiKey)localStorage.setItem('trilogiq_gemini_key',geminiApiKey);},[geminiApiKey]);
+
+  // ✅ AUTO-SAVE JSONBin : sauvegarde automatique 10s après chaque modification
+  useEffect(()=>{
+    if(!hasLoadedRef.current)return; // Ne pas sauvegarder pendant le chargement initial
+    const timer=setTimeout(()=>{
+      const payload={tasks:tasks.map(t=>({...t,start:t.start instanceof Date?t.start.toISOString():t.start})),operators,designFolders,designers,salespeople,savedAt:new Date().toISOString()};
+      fetch(JSONBIN_URL,{method:'PUT',headers:{'Content-Type':'application/json','X-Access-Key':JSONBIN_KEY},body:JSON.stringify(payload)})
+        .then(()=>setServerStatus('ok'))
+        .catch(()=>setServerStatus('offline'));
+    },10000);
+    return()=>clearTimeout(timer);
+  },[tasks,operators,designFolders,designers,salespeople]);
 
   const realignAllTasks=(allTasks)=>{
     let ut=[...allTasks];let changed=true;let iter=0;
@@ -963,6 +976,7 @@ const App=()=>{
     });
   };
   const historyRef=useRef([]);
+  const hasLoadedRef=useRef(false);
   const handleUndo=useCallback(()=>{
     if(historyRef.current.length===0)return;
     const snapshot=historyRef.current[historyRef.current.length-1];
