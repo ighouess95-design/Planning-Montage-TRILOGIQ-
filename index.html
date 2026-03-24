@@ -864,9 +864,8 @@ const Scheduler=({operators,tasks,onEditTask,onDeleteTask,onMoveTask,movingTaskI
 };
 
 const App=()=>{
-  const JSONBIN_ID='69a6f3b8d0ea881f40eadf64';
-  const JSONBIN_KEY='$2a$10$2iAiPcqK8YJB/1FxoNt85eu6sLrUTHzLSvQWHqs6JhOiENK2nRUea';
-  const JSONBIN_URL=`https://api.jsonbin.io/v3/b/${JSONBIN_ID}`;
+  // 🔥 Firebase Realtime Database (REST API — aucun SDK requis)
+  const FB_URL='https://planning-montage-trilogiq-default-rtdb.firebaseio.com/planning.json';
 
   const[isReadOnly,setIsReadOnly]=useState(true);const[searchQuery,setSearchQuery]=useState('');
   const[viewWeeks,setViewWeeks]=useState(1);const[viewDate,setViewDate]=useState(getStartOfWeek(new Date()));
@@ -888,12 +887,10 @@ const App=()=>{
   const[designers,setDesigners]=useState(()=>{const s=localStorage.getItem('trilogiq_designers');return s?JSON.parse(s):['LUDOVIC','JULIEN','CHRISTOPHE','JOAO'];});
   const[salespeople,setSalespeople]=useState(()=>{const s=localStorage.getItem('trilogiq_salespeople');return s?JSON.parse(s):['GUILLAUME HODE','JULIEN ALACRON','CHARLES BRAND'];});
 
-  // Chargement depuis JSONBin
+  // 🔥 Chargement depuis Firebase
   useEffect(()=>{
-    fetch(JSONBIN_URL+'/latest',{headers:{'X-Access-Key':JSONBIN_KEY}})
-      .then(r=>{if(r.status===404){setServerStatus('ok');return null;}return r.json();}).then(data=>{
-        if(!data)return;
-        const d=data.record;
+    fetch(FB_URL)
+      .then(r=>r.json()).then(d=>{
         if(!d||!d.tasks){setServerStatus('ok');return;}
         if(d.tasks&&d.tasks.length>0)setTasks(d.tasks.map(t=>({...t,start:new Date(t.start),operatorStarts:t.operatorStarts||{}})));
         if(d.operators&&d.operators.length>0)setOperators(d.operators.map(op=>({...op,name:op.name==='CHRISTAM'?'CHRISTIAN':op.name})));
@@ -904,16 +901,18 @@ const App=()=>{
       }).catch(()=>setServerStatus('offline'));
   },[]);
 
-  // Rafraîchissement toutes les 30s
+  // 🔥 Rafraîchissement Firebase toutes les 30s
   useEffect(()=>{
     if(serverStatus!=='ok')return;
     const interval=setInterval(()=>{
-      fetch(JSONBIN_URL+'/latest',{headers:{'X-Access-Key':JSONBIN_KEY}})
-        .then(r=>r.json()).then(data=>{
-          const d=data.record;if(!d||!d.tasks)return;
+      fetch(FB_URL)
+        .then(r=>r.json()).then(d=>{
+          if(!d||!d.tasks)return;
           setTasks(d.tasks.map(t=>({...t,start:new Date(t.start),operatorStarts:t.operatorStarts||{}})));
           if(d.operators)setOperators(d.operators);
           if(d.designFolders)setDesignFolders(d.designFolders);
+          if(d.designers)setDesigners(d.designers);
+          if(d.salespeople)setSalespeople(d.salespeople);
         }).catch(()=>setServerStatus('offline'));
     },30000);
     return()=>clearInterval(interval);
@@ -927,14 +926,14 @@ const App=()=>{
   useEffect(()=>{try{localStorage.setItem('trilogiq_salespeople',JSON.stringify(salespeople));}catch(e){}},[salespeople]);
   useEffect(()=>{if(geminiApiKey)try{localStorage.setItem('trilogiq_gemini_key',geminiApiKey);}catch(e){};},[geminiApiKey]);
 
-  // ✅ AUTO-SAVE intelligent : sauvegarde JSONBin 20s après une vraie modification utilisateur (pas les mises à jour serveur)
+  // 🔥 AUTO-SAVE Firebase : 20s après une vraie modification utilisateur (pas les refreshs serveur)
   useEffect(()=>{
     if(!userChangedRef.current)return;
     const timer=setTimeout(()=>{
       if(!userChangedRef.current)return;
       userChangedRef.current=false;
       const payload={tasks:tasks.map(t=>({...t,start:t.start instanceof Date?t.start.toISOString():t.start})),operators,designFolders,designers,salespeople,savedAt:new Date().toISOString()};
-      fetch(JSONBIN_URL,{method:'PUT',headers:{'Content-Type':'application/json','X-Access-Key':JSONBIN_KEY},body:JSON.stringify(payload)})
+      fetch(FB_URL,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
         .then(()=>setServerStatus('ok'))
         .catch(()=>setServerStatus('offline'));
     },20000);
@@ -980,7 +979,7 @@ const App=()=>{
     });
   };
   const historyRef=useRef([]);
-  const userChangedRef=useRef(false); // true uniquement si l'utilisateur a fait une vraie modification
+  const userChangedRef=useRef(false);
   const handleUndo=useCallback(()=>{
     if(historyRef.current.length===0)return;
     const snapshot=historyRef.current[historyRef.current.length-1];
@@ -1016,15 +1015,14 @@ const App=()=>{
     setMovingTaskId(null);
   };
 
-  const handleAddOp=()=>{if(!newOpName.trim())return;userChangedRef.current=true;const op={id:Date.now().toString(),name:newOpName.toUpperCase(),role:newOpRole,color:`#${Math.floor(Math.random()*16777215).toString(16).padStart(6,'0')}`};setOperators(p=>[...p,op]);setNewOpName('');};  const handleResetFlux=()=>{if(window.confirm("⚠️ ALERTE CRITIQUE : Souhaitez-vous vraiment RÉINITIALISER LE FLUX ? Toutes les données du planning seront supprimées.")){setTasks([]);localStorage.removeItem('trilogiq_tasks_v2');}};
+  const handleAddOp=()=>{if(!newOpName.trim())return;const op={id:Date.now().toString(),name:newOpName.toUpperCase(),role:newOpRole,color:`#${Math.floor(Math.random()*16777215).toString(16).padStart(6,'0')}`};setOperators(p=>[...p,op]);setNewOpName('');};
+  const handleResetFlux=()=>{if(window.confirm("⚠️ ALERTE CRITIQUE : Souhaitez-vous vraiment RÉINITIALISER LE FLUX ? Toutes les données du planning seront supprimées.")){setTasks([]);localStorage.removeItem('trilogiq_tasks_v2');}};
   const handleSave=()=>{
     setSaveStatus('saving');
     const payload={tasks:tasks.map(t=>({...t,start:t.start.toISOString()})),operators,designFolders,designers,salespeople,savedAt:new Date().toISOString()};
-    // Sauvegarde localStorage + JSONBin
-    localStorage.setItem('trilogiq_tasks_v2',JSON.stringify(tasks));
-    localStorage.setItem('trilogiq_design_folders',JSON.stringify(designFolders));
-    localStorage.setItem('trilogiq_operators',JSON.stringify(operators));
-    fetch(JSONBIN_URL,{method:'PUT',headers:{'Content-Type':'application/json','X-Access-Key':JSONBIN_KEY},body:JSON.stringify(payload)})
+    try{localStorage.setItem('trilogiq_tasks_v2',JSON.stringify(tasks));localStorage.setItem('trilogiq_design_folders',JSON.stringify(designFolders));localStorage.setItem('trilogiq_operators',JSON.stringify(operators));}catch(e){}
+    // 🔥 Sauvegarde Firebase
+    fetch(FB_URL,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
       .then(r=>r.json()).then(()=>{setSaveStatus('success');setServerStatus('ok');setTimeout(()=>setSaveStatus('idle'),2000);})
       .catch(()=>{setServerStatus('offline');setSaveStatus('success');setTimeout(()=>setSaveStatus('idle'),2000);});
   };
