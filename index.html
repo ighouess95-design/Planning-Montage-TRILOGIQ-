@@ -891,7 +891,8 @@ const App=()=>{
   // Chargement depuis JSONBin
   useEffect(()=>{
     fetch(JSONBIN_URL+'/latest',{headers:{'X-Access-Key':JSONBIN_KEY}})
-      .then(r=>r.json()).then(data=>{
+      .then(r=>{if(r.status===404){setServerStatus('ok');return null;}return r.json();}).then(data=>{
+        if(!data)return;
         const d=data.record;
         if(!d||!d.tasks){setServerStatus('ok');return;}
         if(d.tasks&&d.tasks.length>0)setTasks(d.tasks.map(t=>({...t,start:new Date(t.start),operatorStarts:t.operatorStarts||{}})));
@@ -919,12 +920,26 @@ const App=()=>{
   },[serverStatus]);
 
   // Sauvegarde localStorage (fallback)
-  useEffect(()=>{localStorage.setItem('trilogiq_tasks_v2',JSON.stringify(tasks));},[tasks]);
-  useEffect(()=>{localStorage.setItem('trilogiq_design_folders',JSON.stringify(designFolders));},[designFolders]);
-  useEffect(()=>{localStorage.setItem('trilogiq_operators',JSON.stringify(operators));},[operators]);
-  useEffect(()=>{localStorage.setItem('trilogiq_designers',JSON.stringify(designers));},[designers]);
-  useEffect(()=>{localStorage.setItem('trilogiq_salespeople',JSON.stringify(salespeople));},[salespeople]);
-  useEffect(()=>{if(geminiApiKey)localStorage.setItem('trilogiq_gemini_key',geminiApiKey);},[geminiApiKey]);
+  useEffect(()=>{try{localStorage.setItem('trilogiq_tasks_v2',JSON.stringify(tasks));}catch(e){}},[tasks]);
+  useEffect(()=>{try{localStorage.setItem('trilogiq_design_folders',JSON.stringify(designFolders));}catch(e){}},[designFolders]);
+  useEffect(()=>{try{localStorage.setItem('trilogiq_operators',JSON.stringify(operators));}catch(e){}},[operators]);
+  useEffect(()=>{try{localStorage.setItem('trilogiq_designers',JSON.stringify(designers));}catch(e){}},[designers]);
+  useEffect(()=>{try{localStorage.setItem('trilogiq_salespeople',JSON.stringify(salespeople));}catch(e){}},[salespeople]);
+  useEffect(()=>{if(geminiApiKey)try{localStorage.setItem('trilogiq_gemini_key',geminiApiKey);}catch(e){};},[geminiApiKey]);
+
+  // ✅ AUTO-SAVE intelligent : sauvegarde JSONBin 20s après une vraie modification utilisateur (pas les mises à jour serveur)
+  useEffect(()=>{
+    if(!userChangedRef.current)return;
+    const timer=setTimeout(()=>{
+      if(!userChangedRef.current)return;
+      userChangedRef.current=false;
+      const payload={tasks:tasks.map(t=>({...t,start:t.start instanceof Date?t.start.toISOString():t.start})),operators,designFolders,designers,salespeople,savedAt:new Date().toISOString()};
+      fetch(JSONBIN_URL,{method:'PUT',headers:{'Content-Type':'application/json','X-Access-Key':JSONBIN_KEY},body:JSON.stringify(payload)})
+        .then(()=>setServerStatus('ok'))
+        .catch(()=>setServerStatus('offline'));
+    },20000);
+    return()=>clearTimeout(timer);
+  },[tasks,operators,designFolders,designers,salespeople]);
 
   const realignAllTasks=(allTasks)=>{
     let ut=[...allTasks];let changed=true;let iter=0;
@@ -948,6 +963,7 @@ const App=()=>{
   };
 
   const handleSaveTask=(newTask)=>{
+    userChangedRef.current=true;
     setTasks(prev=>{
       historyRef.current=[...historyRef.current,prev];
       setHistory([...historyRef.current]);
@@ -956,6 +972,7 @@ const App=()=>{
     setIsModalOpen(false);setEditingTask(null);
   };
   const handleDeleteTask=(taskId)=>{
+    userChangedRef.current=true;
     setTasks(prev=>{
       historyRef.current=[...historyRef.current,prev];
       setHistory([...historyRef.current]);
@@ -963,6 +980,7 @@ const App=()=>{
     });
   };
   const historyRef=useRef([]);
+  const userChangedRef=useRef(false); // true uniquement si l'utilisateur a fait une vraie modification
   const handleUndo=useCallback(()=>{
     if(historyRef.current.length===0)return;
     const snapshot=historyRef.current[historyRef.current.length-1];
@@ -977,6 +995,7 @@ const App=()=>{
   },[handleUndo]);
 
   const handleMoveTask=(id,newDate,newOpId,sourceOpId)=>{
+    userChangedRef.current=true;
     setTasks(prev=>{
       historyRef.current=[...historyRef.current,prev];
       setHistory([...historyRef.current]);
@@ -997,8 +1016,7 @@ const App=()=>{
     setMovingTaskId(null);
   };
 
-  const handleAddOp=()=>{if(!newOpName.trim())return;const op={id:Date.now().toString(),name:newOpName.toUpperCase(),role:newOpRole,color:`#${Math.floor(Math.random()*16777215).toString(16).padStart(6,'0')}`};setOperators(p=>[...p,op]);setNewOpName('');};
-  const handleResetFlux=()=>{if(window.confirm("⚠️ ALERTE CRITIQUE : Souhaitez-vous vraiment RÉINITIALISER LE FLUX ? Toutes les données du planning seront supprimées.")){setTasks([]);localStorage.removeItem('trilogiq_tasks_v2');}};
+  const handleAddOp=()=>{if(!newOpName.trim())return;userChangedRef.current=true;const op={id:Date.now().toString(),name:newOpName.toUpperCase(),role:newOpRole,color:`#${Math.floor(Math.random()*16777215).toString(16).padStart(6,'0')}`};setOperators(p=>[...p,op]);setNewOpName('');};  const handleResetFlux=()=>{if(window.confirm("⚠️ ALERTE CRITIQUE : Souhaitez-vous vraiment RÉINITIALISER LE FLUX ? Toutes les données du planning seront supprimées.")){setTasks([]);localStorage.removeItem('trilogiq_tasks_v2');}};
   const handleSave=()=>{
     setSaveStatus('saving');
     const payload={tasks:tasks.map(t=>({...t,start:t.start.toISOString()})),operators,designFolders,designers,salespeople,savedAt:new Date().toISOString()};
