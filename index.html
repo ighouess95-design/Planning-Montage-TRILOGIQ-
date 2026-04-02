@@ -20,6 +20,7 @@ body{margin:0;padding:0;overflow:hidden;background:#0f172a;color:#e2e8f0;font-fa
 @keyframes search-flash{0%,100%{border:2px solid rgba(251,191,36,.4);box-shadow:0 0 10px rgba(251,191,36,.2)}50%{border:2px solid rgba(251,191,36,1);box-shadow:0 0 35px rgba(251,191,36,.9);transform:scale(1.03)}}
 .search-match-flash{animation:search-flash 1s infinite ease-in-out;z-index:100!important}
 @keyframes bounce{0%,100%{transform:translateY(-10%)}50%{transform:none}}
+@keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
 @keyframes ping{75%,100%{transform:scale(2);opacity:0}}
 .animate-bounce{animation:bounce 1s infinite}.animate-pulse{animation:pulse 2s cubic-bezier(.4,0,.6,1) infinite}.animate-ping{animation:ping 1s cubic-bezier(0,0,.2,1) infinite}
@@ -64,7 +65,7 @@ const getStartOfWeek=(d)=>{const dt=new Date(d);const day=dt.getDay();const diff
 const addDays=(d,n)=>{const dt=new Date(d.valueOf());dt.setDate(dt.getDate()+n);return dt;};
 const getDayName=(d)=>d.toLocaleDateString('fr-FR',{weekday:'long'});
 const getDayOfMonth=(d)=>d.getDate();
-const getOperatorDuration=(task,opId)=>{if(task.client==='CONGES')return task.duration;let ms=0,mc=0;task.operatorIds.forEach(id=>{const dv=task.operatorDurations?task.operatorDurations[id]:undefined;if(dv!=null&&!isNaN(dv)){ms+=dv;mc++;}});const my=task.operatorDurations?task.operatorDurations[opId]:undefined;if(my!=null&&!isNaN(my))return my;const auto=task.operatorIds.length-mc;if(auto<=0)return 0;return Math.max(0,task.duration-ms)/auto;};
+const getOperatorDuration=(task,opId)=>{if(task.client==='CONGES')return task.duration;let ms=0,mc=0;(task.operatorIds||[]).forEach(id=>{const dv=task.operatorDurations?task.operatorDurations[id]:undefined;if(dv!=null&&!isNaN(dv)){ms+=dv;mc++;}});const my=task.operatorDurations?task.operatorDurations[opId]:undefined;if(my!=null&&!isNaN(my))return my;const auto=(task.operatorIds||[]).length-mc;if(auto<=0)return 0;return Math.max(0,task.duration-ms)/auto;};
 
 const AppIcon=({className=''})=><svg xmlns="http://www.w3.org/2000/svg" className={`h-8 w-8 text-blue-400 ${className}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>;
 const PlusIcon=({className=''})=><svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/></svg>;
@@ -146,10 +147,12 @@ const NotificationBell=({tasks})=>{
   </div>);
 };
 
-const TaskCard=({task,onClick,onMoveClick,onDelete,style,searchQuery,isFirstSegment,segmentHours})=>{
+const TaskCard=({task,onClick,onMoveClick,onDelete,style,searchQuery,isFirstSegment,segmentHours,isDragging,onDragStart})=>{
   const[isConfirming,setIsConfirming]=useState(false);
   const[hcTooltip,setHcTooltip]=useState(null);
   const[descTooltip,setDescTooltip]=useState(null);
+  const dragStartPos=useRef(null);
+  const dragStarted=useRef(false);
   useEffect(()=>{if(isConfirming){const t=setTimeout(()=>setIsConfirming(false),3000);return()=>clearTimeout(t);}},[isConfirming]);
   const isConges=task.client==='CONGES';
   const isCompleted=task.status==='completed',isInProgress=task.status==='in_progress';
@@ -157,9 +160,38 @@ const TaskCard=({task,onClick,onMoveClick,onDelete,style,searchQuery,isFirstSegm
   const isMatch=useMemo(()=>{if(!isSearchActive)return true;const q=searchQuery.trim().toLowerCase();return task.client.toLowerCase().includes(q)||(task.orderNumber||'').toString().toLowerCase().includes(q);},[isSearchActive,searchQuery,task]);
   const finalColor=isCompleted?'#475569':task.color;
   const textColor=getContrastColor(finalColor);
+
+  const handleMouseDown=(e)=>{
+    if(e.button!==0||isCompleted)return;
+    // Ne pas intercepter les clics sur les boutons enfants (supprimer, HC, etc.)
+    if(e.target.closest('button'))return;
+    dragStartPos.current={x:e.clientX,y:e.clientY};
+    dragStarted.current=false;
+    const onMouseMove=(ev)=>{
+      if(!dragStartPos.current)return;
+      const dx=Math.abs(ev.clientX-dragStartPos.current.x);
+      const dy=Math.abs(ev.clientY-dragStartPos.current.y);
+      if(!dragStarted.current&&(dx>6||dy>6)){
+        dragStarted.current=true;
+        onDragStart&&onDragStart(e);
+      }
+    };
+    const onMouseUp=(ev)=>{
+      document.removeEventListener('mousemove',onMouseMove);
+      document.removeEventListener('mouseup',onMouseUp);
+      if(!dragStarted.current&&!ev.target.closest('button')){
+        // Clic simple sans drag et pas sur un bouton → mode déplacement classique
+        onMoveClick&&onMoveClick();
+      }
+      dragStartPos.current=null;
+      dragStarted.current=false;
+    };
+    document.addEventListener('mousemove',onMouseMove);
+    document.addEventListener('mouseup',onMouseUp);
+  };
+
   if(isConges)return(<div className={`task-card absolute flex items-center justify-center overflow-hidden border border-gray-300 ${isSearchActive&&!isMatch?'opacity-5 grayscale':''}`} style={{...style,backgroundColor:'#ffffff',color:'#1e293b',borderRadius:'12px'}} onClick={onClick}><span className="text-[10px] font-black uppercase opacity-60 tracking-[0.4em] px-1 truncate">CONGÉS</span></div>);
   return(<>
-    {/* Tooltip HC - rendu en dehors de la carte via portal simulé */}
     {hcTooltip&&(
       <div style={{position:'fixed',top:hcTooltip.y,left:hcTooltip.x,zIndex:999999,width:'280px',backgroundColor:'#020617',border:'1px solid #ef4444',borderRadius:'16px',padding:'14px',boxShadow:'0 25px 60px rgba(0,0,0,.9)',pointerEvents:'none'}} onMouseLeave={()=>setHcTooltip(null)}>
         <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'10px',paddingBottom:'8px',borderBottom:'1px solid #1e293b'}}>
@@ -173,14 +205,13 @@ const TaskCard=({task,onClick,onMoveClick,onDelete,style,searchQuery,isFirstSegm
               {item.receptionDate&&<div style={{fontSize:'10px',color:'#64748b',marginTop:'3px'}}>📅 Prévu : {new Date(item.receptionDate).toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'numeric'})}</div>}
             </div>
             <div style={{display:'flex',alignItems:'center',gap:'4px',flexShrink:0,marginLeft:'8px'}}>
-              {item.received?<><span style={{fontSize:'8px',fontWeight:900,color:'#34d399',backgroundColor:'rgba(52,211,153,.1)',padding:'2px 6px',borderRadius:'6px',border:'1px solid rgba(52,211,153,.3)'}}>REÇUE ✓</span></>
+              {item.received?<span style={{fontSize:'8px',fontWeight:900,color:'#34d399',backgroundColor:'rgba(52,211,153,.1)',padding:'2px 6px',borderRadius:'6px',border:'1px solid rgba(52,211,153,.3)'}}>REÇUE ✓</span>
               :<span style={{fontSize:'8px',fontWeight:900,color:'#f87171',backgroundColor:'rgba(248,113,113,.1)',padding:'2px 6px',borderRadius:'6px',border:'1px solid rgba(248,113,113,.3)'}}>ATTENTE</span>}
             </div>
           </div>))}
         </div>
       </div>
     )}
-    {/* Tooltip commentaire */}
     {descTooltip&&(
       <div style={{position:'fixed',top:descTooltip.y,left:descTooltip.x,zIndex:999999,width:'280px',backgroundColor:'#020617',border:'1px solid rgba(59,130,246,.5)',borderRadius:'16px',padding:'14px',boxShadow:'0 25px 60px rgba(0,0,0,.9)',pointerEvents:'none'}}>
         <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'8px',paddingBottom:'8px',borderBottom:'1px solid #1e293b'}}>
@@ -190,9 +221,10 @@ const TaskCard=({task,onClick,onMoveClick,onDelete,style,searchQuery,isFirstSegm
         <p style={{fontSize:'12px',fontWeight:600,color:'white',lineHeight:1.5,fontStyle:'italic'}}>"{task.description}"</p>
       </div>
     )}
-    <div className={`task-card absolute flex flex-col p-2.5 shadow-2xl border group ${isSearchActive&&isMatch?'search-match-flash':''} ${isSearchActive&&!isMatch?'opacity-10 grayscale':''} ${isCompleted?'opacity-70':''} ${isInProgress?'in-progress-glow':''}`}
-      style={{...style,backgroundColor:finalColor,color:textColor,borderRadius:'16px',borderColor:isInProgress?'#fff':task.priority==='Urgent'?'#facc15':'rgba(255,255,255,0.12)',borderWidth:isInProgress?'2px':'1px',zIndex:isInProgress?30:10}}
-      onClick={onClick}>
+    <div className={`task-card absolute flex flex-col p-2.5 shadow-2xl border group ${isSearchActive&&isMatch?'search-match-flash':''} ${isSearchActive&&!isMatch?'opacity-10 grayscale':''} ${isCompleted?'opacity-70':''} ${isInProgress?'in-progress-glow':''} ${isDragging?'opacity-40':''}`}
+      style={{...style,backgroundColor:finalColor,color:textColor,borderRadius:'16px',borderColor:isInProgress?'#fff':task.priority==='Urgent'?'#facc15':'rgba(255,255,255,0.12)',borderWidth:isInProgress?'2px':'1px',zIndex:isInProgress?30:10,cursor:isCompleted?'pointer':'grab'}}
+      onClick={onClick}
+      onMouseDown={!isCompleted&&isFirstSegment?(e)=>{e.stopPropagation();handleMouseDown(e);}:undefined}>
       <div className="flex flex-col h-full w-full relative min-w-0">
         <div className="flex flex-col min-w-0 z-10 leading-none relative">
           <div className="flex justify-between items-start"
@@ -210,9 +242,8 @@ const TaskCard=({task,onClick,onMoveClick,onDelete,style,searchQuery,isFirstSegm
               {segmentHours?segmentHours.toFixed(1):'?'}<span className="text-[8px] opacity-90">H</span>
               {isFirstSegment&&<span className="text-[9px] text-white font-black ml-1.5">({isCompleted&&task.realDuration?task.realDuration:task.duration}H)</span>}
             </div>
-            {isFirstSegment&&onMoveClick&&!isCompleted&&(
+            {isFirstSegment&&!isCompleted&&(
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all flex-shrink-0">
-                {!isConfirming&&<button type="button" onClick={(e)=>{e.stopPropagation();onMoveClick();}} className="p-1 bg-slate-950/90 border border-white/30 hover:bg-blue-600 rounded-lg text-white shadow-xl transition-all" title="Déplacer"><MoveIcon className="h-3.5 w-3.5"/></button>}
                 {isConfirming?(<button type="button" onClick={(e)=>{e.stopPropagation();onDelete();setIsConfirming(false);}} className="px-2 py-1 bg-red-600 text-white text-[9px] font-black rounded-lg animate-pulse">SUP?</button>)
                 :(<button type="button" onClick={(e)=>{e.stopPropagation();setIsConfirming(true);}} className="p-1 bg-slate-950/90 border border-white/30 hover:bg-red-600 rounded-lg text-white shadow-xl transition-all" title="Supprimer"><TrashIcon className="h-3.5 w-3.5"/></button>)}
               </div>
@@ -247,50 +278,57 @@ const EditableSelect=({label,value,onChange,options,onOptionsChange})=>{
   </div>);
 };
 
-const TaskModal=({isOpen,onClose,onSaveTask,operators,tasks,taskToEdit,designers,setDesigners,salespeople,setSalespeople})=>{
+const TaskModal=({isOpen,onClose,onSaveTask,onDelete,operators,tasks,taskToEdit,designers,setDesigners,salespeople,setSalespeople})=>{
   const[client,setClient]=useState('');const[orderNumber,setOrderNumber]=useState('');const[duration,setDuration]=useState('');const[realDuration,setRealDuration]=useState(undefined);
-  const[furnitureCount,setFurnitureCount]=useState('');const[startDate,setStartDate]=useState(new Date().toISOString().split('T')[0]);const[startTime,setStartTime]=useState('08:00');
+  const[furnitureCount,setFurnitureCount]=useState('');
+  const localDateStr=(d)=>{const p=n=>String(n).padStart(2,'0');return`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;};
+  const localTimeStr=(d)=>{const p=n=>String(n).padStart(2,'0');return`${p(d.getHours())}:${p(d.getMinutes())}`;};
+  const[magnetMode,setMagnetMode]=useState(true);
+  const[startDate,setStartDate]=useState(localDateStr(new Date()));const[startTime,setStartTime]=useState('08:00');
   const[selectedOpIds,setSelectedOpIds]=useState([]);const[opStarts,setOpStarts]=useState({});const[opDurations,setOpDurations]=useState({});
   const[priority,setPriority]=useState('Normal');const[status,setStatus]=useState('planned');const[taskColor,setTaskColor]=useState(TASK_COLORS[0]);
   const[description,setDescription]=useState('');const[shippingDate,setShippingDate]=useState('');const[hcItems,setHcItems]=useState([]);
   const[receptionDate,setReceptionDate]=useState('');const[transmissionDateToBE,setTransmissionDateToBE]=useState('');const[designer,setDesigner]=useState('');
   const[deadlineBE,setDeadlineBE]=useState('');const[returnDateBE,setReturnDateBE]=useState('');const[salesperson,setSalesperson]=useState('');
   const[amount,setAmount]=useState('');const[transportCost,setTransportCost]=useState('');
-  const[isManutan,setIsManutan]=useState(false);const[isPlaque,setIsPlaque]=useState(false);const[isTube,setIsTube]=useState(false);const[isHoshin,setIsHoshin]=useState(false);const[isReservation,setIsReservation]=useState(false);
+  const[isManutan,setIsManutan]=useState(false);const[isPlaque,setIsPlaque]=useState(false);const[isTube,setIsTube]=useState(false);const[isHoshin,setIsHoshin]=useState(false);const[isReservation,setIsReservation]=useState(false);const[isPinned,setIsPinned]=useState(false);
 
   useEffect(()=>{
     if(taskToEdit){
       setClient(taskToEdit.client.toUpperCase());setOrderNumber(taskToEdit.orderNumber||'');setDuration(taskToEdit.duration);setRealDuration(taskToEdit.realDuration);setFurnitureCount(taskToEdit.furnitureCount||'');
-      const sd=new Date(taskToEdit.start);setStartDate(sd.toISOString().split('T')[0]);setStartTime(sd.getHours().toString().padStart(2,'0')+':'+sd.getMinutes().toString().padStart(2,'0'));
+      const sd=new Date(taskToEdit.start);setStartDate(localDateStr(sd));setStartTime(localTimeStr(sd));
       setSelectedOpIds(taskToEdit.operatorIds||[]);setOpStarts(taskToEdit.operatorStarts||{});setOpDurations(taskToEdit.operatorDurations||{});
       setPriority(taskToEdit.priority||'Normal');setStatus(taskToEdit.status||'planned');setTaskColor(taskToEdit.color||TASK_COLORS[0]);
       setDescription(taskToEdit.description||'');setShippingDate(taskToEdit.shippingDate||'');setHcItems(taskToEdit.horsCatalogue||[]);
       setReceptionDate(taskToEdit.receptionDate||'');setTransmissionDateToBE(taskToEdit.transmissionDateToBE||'');setDesigner(taskToEdit.designer||'');
       setDeadlineBE(taskToEdit.deadlineBE||'');setReturnDateBE(taskToEdit.returnDateBE||'');setSalesperson(taskToEdit.salesperson||'');
       setAmount(taskToEdit.amount||'');setTransportCost(taskToEdit.transportCost||'');
-      setIsManutan(!!taskToEdit.isManutan);setIsPlaque(!!taskToEdit.isPlaque);setIsTube(!!taskToEdit.isTubeCutting);setIsHoshin(!!taskToEdit.isHoshin);setIsReservation(!!taskToEdit.isReservation);
+      setIsManutan(!!taskToEdit.isManutan);setIsPlaque(!!taskToEdit.isPlaque);setIsTube(!!taskToEdit.isTubeCutting);setIsHoshin(!!taskToEdit.isHoshin);setIsReservation(!!taskToEdit.isReservation);setIsPinned(!!(taskToEdit.pinned||taskToEdit.isReservation));
     }else{
       setClient('');setOrderNumber('');setDuration('');setRealDuration(undefined);setFurnitureCount('');
-      setStartDate(new Date().toISOString().split('T')[0]);setStartTime('08:00');
+      setStartDate(localDateStr(new Date()));setStartTime('08:00');setMagnetMode(true);
       setSelectedOpIds([]);setOpStarts({});setOpDurations({});setPriority('Normal');setStatus('planned');
       setTaskColor(TASK_COLORS[Math.floor(Math.random()*(TASK_COLORS.length-1))]);
       setDescription('');setShippingDate('');setHcItems([]);setReceptionDate('');setTransmissionDateToBE('');setDesigner('');setDeadlineBE('');setReturnDateBE('');setSalesperson('');setAmount('');setTransportCost('');
-      setIsManutan(false);setIsPlaque(false);setIsTube(false);setIsHoshin(false);setIsReservation(false);
+      setIsManutan(false);setIsPlaque(false);setIsTube(false);setIsHoshin(false);setIsReservation(false);setIsPinned(false);
     }
   },[taskToEdit,isOpen]);
 
+  const tasksRef=useRef(tasks);
+  useEffect(()=>{tasksRef.current=tasks;},[tasks]);
+
   useEffect(()=>{
-    if(!taskToEdit&&selectedOpIds.length>0){
+    if(!taskToEdit&&selectedOpIds.length>0&&magnetMode){
       const opId=selectedOpIds[selectedOpIds.length-1];
-      const opTasks=tasks.filter(t=>t.operatorIds.includes(opId));
+      const opTasks=tasksRef.current.filter(t=>(t.operatorIds||[]).includes(opId));
       if(opTasks.length>0){
         const latest=opTasks.reduce((a,b)=>calculateTaskEnd(a)>calculateTaskEnd(b)?a:b);
         const end=calculateTaskEnd(latest);
-        setStartDate(end.getFullYear()+'-'+String(end.getMonth()+1).padStart(2,'0')+'-'+String(end.getDate()).padStart(2,'0'));setStartTime(end.getHours().toString().padStart(2,'0')+':'+end.getMinutes().toString().padStart(2,'0'));
+        setStartDate(localDateStr(end));setStartTime(localTimeStr(end));
         setOpStarts(prev=>({...prev,[opId]:end.toISOString()}));
       }
     }
-  },[selectedOpIds,tasks,taskToEdit]);
+  },[selectedOpIds,magnetMode]);
 
   const handleToggleSpecial=(type,val)=>{
     if(type==='manutan'){setIsManutan(val);if(val)setTaskColor('#ec4899');}
@@ -319,7 +357,8 @@ const TaskModal=({isOpen,onClose,onSaveTask,operators,tasks,taskToEdit,designers
       priority,status,color:taskColor,description,shippingDate,horsCatalogue:hcItems,
       receptionDate,transmissionDateToBE,designer,deadlineBE,returnDateBE,salesperson,
       amount:amount===''?undefined:Number(amount),transportCost:transportCost===''?undefined:Number(transportCost),
-      isManutan,isPlaque,isTubeCutting:isTube,isHoshin,isReservation
+      isManutan,isPlaque,isTubeCutting:isTube,isHoshin,isReservation,
+      pinned:taskToEdit?isPinned:((!magnetMode||isReservation))
     };
     onSaveTask(newTask);onClose();
   };
@@ -340,6 +379,11 @@ const TaskModal=({isOpen,onClose,onSaveTask,operators,tasks,taskToEdit,designers
                 <span className="text-[10px] font-black uppercase tracking-widest">{item.label}</span>
               </label>
             ))}
+            <label className={`flex items-center gap-3 px-5 py-4 rounded-xl border cursor-pointer transition-all ${isPinned?'bg-amber-600/20 border-amber-500 text-amber-400':'bg-[#161d2b] border-white/5 text-slate-500 hover:bg-white/5'}`}>
+              <input type="checkbox" checked={isPinned} onChange={e=>setIsPinned(e.target.checked)} className="hidden"/>
+              <div className={`w-5 h-5 border-2 rounded flex items-center justify-center ${isPinned?'bg-amber-500 border-amber-500':'border-slate-700'}`}>{isPinned&&<div className="w-2 h-2 bg-white rounded-sm"/>}</div>
+              <span className="text-[10px] font-black uppercase tracking-widest">📌 FIXER LA POSITION</span>
+            </label>
           </div>
           <div className="grid grid-cols-2 gap-8">
             <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">N° DE COMMANDE *</label><input required value={orderNumber} onChange={e=>setOrderNumber(e.target.value.replace(/\D/g,''))} className="w-full bg-[#161d2b] border border-white/5 rounded-2xl p-5 text-white outline-none focus:border-blue-500 font-bold" placeholder="CHIFFRES UNIQUEMENT"/></div>
@@ -347,12 +391,17 @@ const TaskModal=({isOpen,onClose,onSaveTask,operators,tasks,taskToEdit,designers
             <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">NB DE MEUBLES</label><input type="number" value={furnitureCount} onChange={e=>setFurnitureCount(e.target.value===''?'':parseInt(e.target.value))} className="w-full bg-[#161d2b] border border-white/5 rounded-2xl p-5 text-white outline-none font-bold" placeholder="À définir"/></div>
             <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">EXPÉDITION</label><input type="date" value={shippingDate} onChange={e=>setShippingDate(e.target.value)} className="w-full bg-[#161d2b] border border-white/5 rounded-2xl p-5 text-white outline-none font-bold"/></div>
           </div>
-          <div className="grid grid-cols-2 gap-8 items-end">
-            <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">DÉBUT DU MONTAGE *</label>
-              <div className="flex gap-2"><input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} className="flex-1 bg-[#161d2b] border border-white/5 rounded-2xl p-5 text-white font-bold outline-none"/><input type="time" value={startTime} onChange={e=>setStartTime(e.target.value)} className="w-32 bg-[#161d2b] border border-white/5 rounded-2xl p-5 text-white font-bold outline-none"/></div>
+          {!taskToEdit&&(<div className="space-y-2">
+            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">MODE POSITIONNEMENT DU DÉBUT</label>
+            <div className="flex gap-2">
+              <button type="button" onClick={()=>setMagnetMode(true)} className={`flex-1 flex items-center justify-center gap-2 py-4 px-4 rounded-2xl font-black text-[10px] uppercase border transition-all ${magnetMode?'bg-blue-600 border-blue-400 text-white':'bg-[#161d2b] border-white/5 text-slate-500 hover:border-blue-500/50'}`}>
+                🧲 AIMANT AUTO — à la suite du dernier monteur
+              </button>
+              <button type="button" onClick={()=>setMagnetMode(false)} className={`flex-1 flex items-center justify-center gap-2 py-4 px-4 rounded-2xl font-black text-[10px] uppercase border transition-all ${!magnetMode?'bg-amber-600 border-amber-400 text-white':'bg-[#161d2b] border-white/5 text-slate-500 hover:border-amber-500/50'}`}>
+                📅 MANUEL — début aujourd'hui à 08h00
+              </button>
             </div>
-            <div className="bg-blue-600/10 border border-blue-500/30 text-blue-400 py-5 px-6 rounded-2xl text-[9px] font-black uppercase tracking-widest text-center italic leading-tight">AIMANT AUTOMATIQUE ACTIVÉ :<br/>Le début s'ajuste à la fin de la tâche précédente dès que vous cochez un monteur.</div>
-          </div>
+          </div>)}
           <div className="grid grid-cols-2 gap-8">
             <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">TEMPS THÉORIQUE (H) *</label><input required type="number" step="0.5" value={duration} onChange={e=>setDuration(e.target.value===''?'':parseFloat(e.target.value))} className="w-full bg-[#161d2b] border border-white/5 rounded-2xl p-5 text-white font-bold outline-none" placeholder="À définir"/></div>
             <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">TEMPS RÉEL (H)</label><input type="number" step="0.5" value={realDuration||''} onChange={e=>setRealDuration(e.target.value===''?undefined:parseFloat(e.target.value))} className="w-full bg-[#161d2b] border border-white/5 rounded-2xl p-5 text-white outline-none font-bold" placeholder="Heure réelle"/></div>
@@ -383,7 +432,7 @@ const TaskModal=({isOpen,onClose,onSaveTask,operators,tasks,taskToEdit,designers
               </div>
               <div className="grid grid-cols-2 gap-8">
                 <EditableSelect label="DESSINATEUR" value={designer} onChange={setDesigner} options={designers} onOptionsChange={setDesigners}/>
-                <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">DEADLINE BE</label><input type="date" value={deadlineBE} onChange={e=>setDeadlineBE(e.target.value)} className="w-full bg-[#1e2533] border border-white/5 rounded-2xl p-5 text-white outline-none font-bold"/></div>
+                <div></div>
               </div>
               <div className="grid grid-cols-2 gap-8">
                 <div className="space-y-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">RETOUR DU BE</label><input type="date" value={returnDateBE} onChange={e=>setReturnDateBE(e.target.value)} className="w-full bg-[#1e2533] border border-white/5 rounded-2xl p-5 text-white outline-none font-bold"/></div>
@@ -445,9 +494,10 @@ const TaskModal=({isOpen,onClose,onSaveTask,operators,tasks,taskToEdit,designers
             <textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Instructions pour le monteur..." className="w-full bg-[#161d2b] border border-white/5 rounded-3xl p-8 text-white text-sm outline-none focus:border-blue-500 min-h-[120px] resize-none font-bold"/>
           </div>
         </form>
-        <div className="p-10 bg-[#161d2b]/50 border-t border-white/5 flex items-center justify-between">
-          <button onClick={onClose} className="px-10 py-5 border border-white/10 text-white text-[11px] font-black rounded-2xl uppercase tracking-widest hover:bg-white/5 transition-all">Annuler</button>
-          <button onClick={handleSubmit} className="px-14 py-5 bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-black rounded-2xl uppercase tracking-widest flex items-center gap-4 shadow-2xl active:scale-95 transition-all">
+        <div className="p-8 bg-[#161d2b]/50 border-t border-white/5 flex flex-wrap items-center gap-4 justify-between">
+          <button onClick={onClose} className="px-8 py-4 border border-white/10 text-white text-[11px] font-black rounded-2xl uppercase tracking-widest hover:bg-white/5 transition-all">Annuler</button>
+          {taskToEdit&&(<button type="button" onClick={()=>{if(window.confirm(`Supprimer la commande ${taskToEdit.orderNumber||''} (${taskToEdit.client}) ?`)){onDelete&&onDelete(taskToEdit.id);onClose();}}} className="px-8 py-4 bg-red-600/20 border border-red-500/40 hover:bg-red-600 text-red-400 hover:text-white text-[11px] font-black rounded-2xl uppercase tracking-widest flex items-center gap-3 transition-all"><TrashIcon className="h-4 w-4"/>SUPPRIMER LA COMMANDE</button>)}
+          <button onClick={handleSubmit} className="px-10 py-4 bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-black rounded-2xl uppercase tracking-widest flex items-center gap-3 shadow-2xl active:scale-95 transition-all">
             <CheckCircleIcon className="h-5 w-5"/>{taskToEdit?'METTRE À JOUR':'ENREGISTRER LA COMMANDE'}
           </button>
         </div>
@@ -483,7 +533,7 @@ const DashboardModal=({isOpen,onClose,tasks,operators,onUpdateTask})=>{
       if(task.status==='completed'&&task.realDuration!==undefined){thH+=task.duration;rlH+=task.realDuration;eff+=(task.duration-task.realDuration);}
       (task.horsCatalogue||[]).forEach(item=>{const rd=new Date(item.receptionDate);rd.setHours(0,0,0,0);const dd=Math.ceil((today-rd)/(1000*60*60*24));const late=!item.received&&dd>0;if(late)lateHc++;if(!item.received)pendHc++;hcAll.push({...item,client:task.client,orderNumber:task.orderNumber||'N/A',isLate:late,daysDiff:dd});});
       const cn=task.client.trim().toUpperCase();if(!clS[cn])clS[cn]={count:0};clS[cn].count++;
-      task.operatorIds.forEach(opId=>{const op=opS[opId];if(op){op.count++;if(task.furnitureCount)op.furnitures+=(task.furnitureCount/(task.operatorIds.length||1));if(task.status==='completed'&&task.realDuration!==undefined){op.completedCount++;op.theoHours+=(task.duration/(task.operatorIds.length||1));op.realHours+=(task.realDuration/(task.operatorIds.length||1));}}});
+      (task.operatorIds||[]).forEach(opId=>{const op=opS[opId];if(op){op.count++;if(task.furnitureCount)op.furnitures+=(task.furnitureCount/((task.operatorIds||[]).length||1));if(task.status==='completed'&&task.realDuration!==undefined){op.completedCount++;op.theoHours+=(task.duration/((task.operatorIds||[]).length||1));op.realHours+=(task.realDuration/((task.operatorIds||[]).length||1));}}});
     });
     return{totalOrders:tot,totalHoursReal:Math.round(rlH),efficiencyDelta:Math.round(eff),totalFurnitures:Math.round(furn),pipeline:pipe,lateHcCount:lateHc,hcItems:hcAll.sort((a,b)=>(b.isLate?1:0)-(a.isLate?1:0)||b.daysDiff-a.daysDiff),clients:Object.entries(clS).sort(([,a],[,b])=>b.count-a.count),operators:Object.values(opS).sort((a,b)=>(b.theoHours||b.furnitures)-(a.theoHours||a.furnitures)),sales:Object.entries(salesS).sort(([,a],[,b])=>b.amount-a.amount),avgBEDelay:bCnt>0?bDays/bCnt:0,avgMontageDelay:mCnt>0?mDays/mCnt:0,beItems:beItems.sort((a,b)=>(b.isLate?1:0)-(a.isLate?1:0)),bePending,beLate,beCompleted};
   },[tasks,operators,selMonth,yr]);
@@ -747,6 +797,7 @@ const Scheduler=({operators,tasks,onEditTask,onDeleteTask,onMoveTask,movingTaskI
   const[currentTime,setCurrentTime]=useState(new Date());
   const[hoverX,setHoverX]=useState(null);const[hoverInfo,setHoverInfo]=useState(null);
   const[containerWidth,setContainerWidth]=useState(window.innerWidth-300);
+  const[dragState,setDragState]=useState(null); // {taskId, opId, ghostX, ghostY, ghostW, ghostH, taskRef}
   useEffect(()=>{if(!containerRef.current)return;const ob=new ResizeObserver(e=>{for(const en of e)setContainerWidth(en.contentRect.width);});ob.observe(containerRef.current);return()=>ob.disconnect();},[]);
   useEffect(()=>{const t=setInterval(()=>setCurrentTime(new Date()),60000);return()=>clearInterval(t);},[]);
   const totalGridHeight=useMemo(()=>operators.length*OPERATOR_ROW_HEIGHT,[operators.length]);
@@ -764,7 +815,10 @@ const Scheduler=({operators,tasks,onEditTask,onDeleteTask,onMoveTask,movingTaskI
     const pxH=BASE_DAY_WIDTH/cap;const fd=getClockTimeFromWorkHours(targetDay,Math.min(cap,offsetInDay/pxH));
     return{day:targetDay,finalDate:fd,timeStr:`${fd.getHours().toString().padStart(2,'0')}H${fd.getMinutes().toString().padStart(2,'0')}`};
   };
-  const handleMouseMove=(e)=>{const rect=e.currentTarget.getBoundingClientRect();const x=e.clientX-rect.left+e.currentTarget.scrollLeft;setHoverX(x);const info=getTimeFromX(x);if(info)setHoverInfo(info);};
+  const handleMouseMove=(e)=>{
+    if(!movingTaskId&&!dragState)return; // Pas de trait si aucun déplacement en cours
+    const rect=e.currentTarget.getBoundingClientRect();const x=e.clientX-rect.left+e.currentTarget.scrollLeft;setHoverX(x);const info=getTimeFromX(x);if(info)setHoverInfo(info);
+  };
   const handleGridClick=(e,opId)=>{
     if(!movingTaskId||isReadOnly||!hoverInfo)return;
     const[taskId,sourceOpId]=movingTaskId.split('::');const movingTask=tasks.find(t=>t.id===taskId);if(!movingTask)return;
@@ -779,7 +833,7 @@ const Scheduler=({operators,tasks,onEditTask,onDeleteTask,onMoveTask,movingTaskI
     const segs=[];const q=searchQuery?searchQuery.toLowerCase():'';
     const dt=((!searchQuery||searchQuery.length<2)?tasks:tasks.filter(t=>t.client.toLowerCase().includes(q)||(t.orderNumber||'').toString().toLowerCase().includes(q)));
     dt.forEach(task=>{
-      task.operatorIds.forEach(opId=>{
+      (task.operatorIds||[]).forEach(opId=>{
         const opStartStr=task.operatorStarts?task.operatorStarts[opId]:null;
         let cs=opStartStr?new Date(opStartStr):new Date(task.start);cs.setSeconds(0,0);
         const totDur=(task.status==='completed'&&task.realDuration!=null?task.realDuration:task.duration);
@@ -801,6 +855,11 @@ const Scheduler=({operators,tasks,onEditTask,onDeleteTask,onMoveTask,movingTaskI
     return segs;
   },[tasks,searchQuery,dayOffsets,BASE_DAY_WIDTH]);
   return(<div ref={containerRef} className="relative bg-[#0f172a] overflow-auto h-full scrollbar-thin" onMouseMove={handleMouseMove} onMouseLeave={()=>setHoverX(null)}>
+    {/* Ghost card drag & drop */}
+    {dragState&&(<div style={{position:'fixed',left:dragState.ghostX-80,top:dragState.ghostY-30,width:Math.min(dragState.ghostW,200),height:dragState.ghostH,backgroundColor:dragState.taskRef.color,borderRadius:'16px',opacity:0.85,pointerEvents:'none',zIndex:99999,border:'2px solid rgba(255,255,255,0.6)',boxShadow:'0 20px 60px rgba(0,0,0,0.8)',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:'2px'}}>
+      <span style={{fontWeight:900,fontSize:'16px',color:getContrastColor(dragState.taskRef.color)}}>{dragState.taskRef.orderNumber}</span>
+      <span style={{fontWeight:900,fontSize:'10px',color:getContrastColor(dragState.taskRef.color),opacity:0.8,textTransform:'uppercase'}}>{dragState.taskRef.client}</span>
+    </div>)}
     <div style={{width:`${totalWidth+SIDEBAR_WIDTH}px`,minHeight:'100%'}} className="relative flex flex-col">
       <div className="sticky top-0 z-40 bg-[#0f172a] flex border-b-2 border-slate-700/80" style={{height:'110px'}}>
         <div className="sticky left-0 z-50 bg-[#1e293b] border-r-2 border-slate-700 flex items-center justify-center text-[11px] font-black text-slate-400 uppercase tracking-[0.3em]" style={{width:`${SIDEBAR_WIDTH}px`}}>Monteurs</div>
@@ -851,13 +910,49 @@ const Scheduler=({operators,tasks,onEditTask,onDeleteTask,onMoveTask,movingTaskI
           })}
         </div>
         {/* Regroupement des segments en UN SEUL PAD par commande+opérateur */}
-        {Object.values(allSegments.reduce((acc,seg)=>{const key=`${seg.taskId}::${seg.opId}`;if(!acc[key])acc[key]={...seg,totalHours:0};acc[key].totalHours+=seg.workedHoursInSeg;acc[key].right=Math.max(acc[key].right||0,seg.left+seg.width);acc[key].left=Math.min(acc[key].left,seg.left);return acc;},{})).map((merged)=>(
-          <TaskCard key={`${merged.taskId}-${merged.opId}`} task={merged.taskRef}
-            onClick={()=>onEditTask(merged.taskRef)} onMoveClick={()=>{if(!isReadOnly)setMovingTaskId(`${merged.taskId}::${merged.opId}`);}} onDelete={()=>onDeleteTask(merged.taskId)}
+        {Object.values(allSegments.reduce((acc,seg)=>{const key=`${seg.taskId}::${seg.opId}`;if(!acc[key])acc[key]={...seg,totalHours:0};acc[key].totalHours+=seg.workedHoursInSeg;acc[key].right=Math.max(acc[key].right||0,seg.left+seg.width);acc[key].left=Math.min(acc[key].left,seg.left);return acc;},{})).map((merged)=>{
+          const handleDragStart=(e)=>{
+            if(isReadOnly)return;
+            const rect=e.currentTarget?e.currentTarget.getBoundingClientRect():{left:e.clientX-80,top:e.clientY-30,width:160,height:60};
+            setDragState({taskId:merged.taskId,opId:merged.opId,taskRef:merged.taskRef,ghostX:e.clientX,ghostY:e.clientY,ghostW:merged.right-merged.left,ghostH:OPERATOR_ROW_HEIGHT-20,offsetX:e.clientX-(merged.left),offsetY:30});
+            setMovingTaskId(`${merged.taskId}::${merged.opId}`);
+            const onMove=(ev)=>{
+              setDragState(prev=>prev?{...prev,ghostX:ev.clientX,ghostY:ev.clientY}:null);
+              const cont=containerRef.current;if(!cont)return;
+              const crect=cont.getBoundingClientRect();
+              const x=ev.clientX-crect.left+cont.scrollLeft;
+              setHoverX(x);
+              const info=getTimeFromX(x);if(info)setHoverInfo(info);
+            };
+            const onUp=(ev)=>{
+              document.removeEventListener('mousemove',onMove);
+              document.removeEventListener('mouseup',onUp);
+              setDragState(null);
+              if(!hoverInfo)return;
+              // Trouver l'opérateur sous le curseur
+              const cont=containerRef.current;
+              if(!cont)return;
+              const crect=cont.getBoundingClientRect();
+              const relY=ev.clientY-crect.top+cont.scrollTop-110;
+              const opIdx=Math.floor(relY/OPERATOR_ROW_HEIGHT);
+              const targetOp=operators[opIdx];
+              const targetOpId=targetOp?targetOp.id:merged.opId;
+              onMoveTask(merged.taskId,hoverInfo.finalDate,targetOpId,merged.opId);
+              setMovingTaskId(null);setHoverX(null);
+            };
+            document.addEventListener('mousemove',onMove);
+            document.addEventListener('mouseup',onUp);
+          };
+          return(<TaskCard key={`${merged.taskId}-${merged.opId}`} task={merged.taskRef}
+            onClick={()=>onEditTask(merged.taskRef)}
+            onMoveClick={()=>{if(!isReadOnly)setMovingTaskId(`${merged.taskId}::${merged.opId}`);}}
+            onDragStart={!isReadOnly?handleDragStart:undefined}
+            onDelete={()=>onDeleteTask(merged.taskId)}
             segmentHours={merged.totalHours} isFirstSegment={true} searchQuery={searchQuery}
-            style={{top:`${operators.findIndex(op=>op.id===merged.opId)*OPERATOR_ROW_HEIGHT+10}px`,left:`${merged.left}px`,width:`${merged.right-merged.left}px`,height:`${OPERATOR_ROW_HEIGHT-20}px`,zIndex:movingTaskId===`${merged.taskId}::${merged.opId}`?100:10,opacity:movingTaskId===`${merged.taskId}::${merged.opId}`?.3:1}}
-          />
-        ))}
+            isDragging={dragState&&dragState.taskId===merged.taskId&&dragState.opId===merged.opId}
+            style={{top:`${operators.findIndex(op=>op.id===merged.opId)*OPERATOR_ROW_HEIGHT+10}px`,left:`${merged.left}px`,width:`${merged.right-merged.left}px`,height:`${OPERATOR_ROW_HEIGHT-20}px`,zIndex:movingTaskId===`${merged.taskId}::${merged.opId}`?100:10,opacity:movingTaskId===`${merged.taskId}::${merged.opId}`&&!dragState?.taskId===merged.taskId?.1:1}}
+          />);
+        })}
       </div>
     </div>
   </div>);
@@ -880,19 +975,19 @@ const App=()=>{
     return ops.map(op=>({...op,name:op.name==='CHRISTAM'?'CHRISTIAN':op.name}));
   });
   const[newOpName,setNewOpName]=useState('');const[newOpRole,setNewOpRole]=useState('Monteur');
-  const[tasks,setTasks]=useState(()=>{const s=localStorage.getItem('trilogiq_tasks_v2');if(!s)return[];try{return JSON.parse(s).map(t=>({...t,start:new Date(t.start),operatorStarts:t.operatorStarts||{}}));}catch(e){return[];}});
+  const[tasks,setTasks]=useState(()=>{const s=localStorage.getItem('trilogiq_tasks_v2');if(!s)return[];try{return JSON.parse(s).map(t=>({...t,start:new Date(t.start),operatorStarts:t.operatorStarts||{},operatorIds:t.operatorIds||[],operatorDurations:t.operatorDurations||{}}));}catch(e){return[];}});
   const[designFolders,setDesignFolders]=useState(()=>{const s=localStorage.getItem('trilogiq_design_folders');return s?JSON.parse(s):[];});
   const[messages,setMessages]=useState([{sender:'bot',text:'Interface TRILOGIQ restaurée. Le flux de production est prêt.',timestamp:new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}]);
   const[isBotLoading,setIsBotLoading]=useState(false);const[saveStatus,setSaveStatus]=useState('idle');const[history,setHistory]=useState([]);
   const[designers,setDesigners]=useState(()=>{const s=localStorage.getItem('trilogiq_designers');return s?JSON.parse(s):['LUDOVIC','JULIEN','CHRISTOPHE','JOAO'];});
-  const[salespeople,setSalespeople]=useState(()=>{const s=localStorage.getItem('trilogiq_salespeople');return s?JSON.parse(s):['GUILLAUME HODE','JULIEN ALACRON','CHARLES BRAND'];});
+  const[salespeople,setSalespeople]=useState(()=>{const s=localStorage.getItem('trilogiq_salespeople');return s?JSON.parse(s):['GUILLAUME HODE','JULIEN ALARCON','CHARLES BRAND'];});
 
   // 🔥 Chargement depuis Firebase
   useEffect(()=>{
     fetch(FB_URL)
       .then(r=>r.json()).then(d=>{
         if(!d||!d.tasks){setServerStatus('ok');return;}
-        if(d.tasks&&d.tasks.length>0)setTasks(d.tasks.map(t=>({...t,start:new Date(t.start),operatorStarts:t.operatorStarts||{}})));
+        if(d.tasks&&d.tasks.length>0)setTasks(d.tasks.map(t=>({...t,start:new Date(t.start),operatorStarts:t.operatorStarts||{},operatorIds:t.operatorIds||[],operatorDurations:t.operatorDurations||{}})));
         if(d.operators&&d.operators.length>0)setOperators(d.operators.map(op=>({...op,name:op.name==='CHRISTAM'?'CHRISTIAN':op.name})));
         if(d.designFolders)setDesignFolders(d.designFolders);
         if(d.designers)setDesigners(d.designers);
@@ -908,7 +1003,7 @@ const App=()=>{
       fetch(FB_URL)
         .then(r=>r.json()).then(d=>{
           if(!d||!d.tasks)return;
-          setTasks(d.tasks.map(t=>({...t,start:new Date(t.start),operatorStarts:t.operatorStarts||{}})));
+          setTasks(d.tasks.map(t=>({...t,start:new Date(t.start),operatorStarts:t.operatorStarts||{},operatorIds:t.operatorIds||[],operatorDurations:t.operatorDurations||{}})));
           if(d.operators)setOperators(d.operators);
           if(d.designFolders)setDesignFolders(d.designFolders);
           if(d.designers)setDesigners(d.designers);
@@ -949,7 +1044,12 @@ const App=()=>{
         for(let i=1;i<ot.length;i++){
           const prev=ut.find(t=>t.id===ot[i-1].id)||ot[i-1];const curr=ut.find(t=>t.id===ot[i].id)||ot[i];
           if(isNaN(prev.start.getTime())||isNaN(curr.start.getTime()))continue;
-          const prevEnd=calculateTaskEnd({...prev,duration:getOperatorDuration(prev,op.id)});
+          // Ne pas réaligner les tâches fixées (MANUEL ou RÉSERVATION)
+          if(curr.pinned||curr.isReservation)continue;
+          const prevOpDur=getOperatorDuration(prev,op.id);
+          const prevOpDurEff=(prev.status==='completed'&&prev.realDuration!=null&&prev.duration>0)?prevOpDur*(prev.realDuration/prev.duration):prevOpDur;
+          const prevOpStart=prev.operatorStarts&&prev.operatorStarts[op.id]?new Date(prev.operatorStarts[op.id]):new Date(prev.start);
+          const prevEnd=calculateTaskEnd({...prev,start:prevOpStart,duration:prevOpDurEff,realDuration:null,status:'planned'});
           const currOpStart=curr.operatorStarts&&curr.operatorStarts[op.id]?new Date(curr.operatorStarts[op.id]):curr.start;
           if(isNaN(prevEnd.getTime())||isNaN(currOpStart.getTime()))continue;
           if(Math.abs(currOpStart.getTime()-prevEnd.getTime())>60000){
@@ -966,7 +1066,12 @@ const App=()=>{
     setTasks(prev=>{
       historyRef.current=[...historyRef.current,prev];
       setHistory([...historyRef.current]);
-      const idx=prev.findIndex(t=>t.id===newTask.id);let nt=[...prev];if(idx!==-1)nt[idx]=newTask;else nt.push(newTask);return realignAllTasks(nt);
+      const idx=prev.findIndex(t=>t.id===newTask.id);let nt=[...prev];if(idx!==-1)nt[idx]=newTask;else nt.push(newTask);
+      const updated=realignAllTasks(nt);
+      // 🔥 Sauvegarde immédiate Firebase pour éviter que le refresh 30s efface la tâche
+      const payload={tasks:updated.map(t=>({...t,start:t.start instanceof Date?t.start.toISOString():t.start})),operators,designFolders,designers,salespeople,savedAt:new Date().toISOString()};
+      fetch(FB_URL,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(()=>setServerStatus('ok')).catch(()=>setServerStatus('offline'));
+      return updated;
     });
     setIsModalOpen(false);setEditingTask(null);
   };
@@ -975,11 +1080,15 @@ const App=()=>{
     setTasks(prev=>{
       historyRef.current=[...historyRef.current,prev];
       setHistory([...historyRef.current]);
-      return realignAllTasks(prev.filter(t=>t.id!==taskId));
+      const updated=realignAllTasks(prev.filter(t=>t.id!==taskId));
+      const payload={tasks:updated.map(t=>({...t,start:t.start instanceof Date?t.start.toISOString():t.start})),operators,designFolders,designers,salespeople,savedAt:new Date().toISOString()};
+      fetch(FB_URL,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(()=>setServerStatus('ok')).catch(()=>setServerStatus('offline'));
+      return updated;
     });
   };
   const historyRef=useRef([]);
   const userChangedRef=useRef(false);
+  const lastMentionedTaskRef=useRef(null); // 🤖 Contexte chatbot — dernière commande mentionnée
   const handleUndo=useCallback(()=>{
     if(historyRef.current.length===0)return;
     const snapshot=historyRef.current[historyRef.current.length-1];
@@ -1000,7 +1109,7 @@ const App=()=>{
       setHistory([...historyRef.current]);
       let nt=prev.map(t=>{
         if(t.id===id){
-          const ut={...t};
+          const ut={...t,pinned:true};
           if(sourceOpId&&newOpId){
             if(newOpId===sourceOpId){ut.operatorStarts={...(ut.operatorStarts||{}),[sourceOpId]:newDate.toISOString()};}
             else{ut.operatorIds=ut.operatorIds.filter(o=>o!==sourceOpId);const{[sourceOpId]:rs,...restS}=ut.operatorStarts||{};ut.operatorStarts=restS;const{[sourceOpId]:rd,...restD}=ut.operatorDurations||{};ut.operatorDurations=restD;if(!ut.operatorIds.includes(newOpId))ut.operatorIds.push(newOpId);ut.operatorStarts[newOpId]=newDate.toISOString();if(rd)ut.operatorDurations={...ut.operatorDurations,[newOpId]:rd};}
@@ -1010,7 +1119,11 @@ const App=()=>{
           return ut;
         }return t;
       });
-      return realignAllTasks(nt);
+      const updated=realignAllTasks(nt);
+      // 🔥 Sauvegarde immédiate Firebase — évite que le refresh 30s écrase le déplacement
+      const payload={tasks:updated.map(t=>({...t,start:t.start instanceof Date?t.start.toISOString():t.start})),operators,designFolders,designers,salespeople,savedAt:new Date().toISOString()};
+      fetch(FB_URL,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(()=>setServerStatus('ok')).catch(()=>setServerStatus('offline'));
+      return updated;
     });
     setMovingTaskId(null);
   };
@@ -1028,18 +1141,148 @@ const App=()=>{
   };
 
   const handleSendMessage=async(text)=>{
-    if(!text.trim())return;const now=new Date();const ts=now.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
-    setMessages(p=>[...p,{sender:'user',text,timestamp:ts}]);setIsBotLoading(true);
-    try{
-      if(!geminiApiKey){setMessages(p=>[...p,{sender:'bot',text:"⚠️ Clé API Gemini non configurée. Cliquez sur l'icône ✨ pour la saisir.",timestamp:ts}]);}
-      else{
-        const sys=`Tu es PlanifAI, l'assistant d'atelier TRILOGIQ. Date: ${now.toLocaleString('fr-FR')}. Équipe: ${JSON.stringify(operators.map(o=>o.name))}. Tâches: ${JSON.stringify(tasks.slice(0,10).map(t=>({client:t.client,cmd:t.orderNumber,status:t.status})))}. Réponds brièvement en français.`;
-        const resp=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${geminiApiKey}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:`${sys}\n\nUtilisateur: ${text}`}]}]})});
-        const data=await resp.json();const bt=data.candidates?.[0]?.content?.parts?.[0]?.text||'Désolé, je ne peux pas répondre.';
-        setMessages(p=>[...p,{sender:'bot',text:bt,timestamp:new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}]);
+    if(!text.trim())return;
+    const now=new Date();const ts=now.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+    setMessages(p=>[...p,{sender:'user',text,timestamp:ts}]);
+    setIsBotLoading(true);
+
+    // Parser local intelligent — pas d'API externe requise
+    const norm=(s)=>s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    const t=text.toLowerCase().trim();
+    const nt=norm(text);
+    const reply=(msg)=>{setMessages(p=>[...p,{sender:'bot',text:msg,timestamp:ts}]);setIsBotLoading(false);};
+
+    await new Promise(r=>setTimeout(r,400));
+
+    // Chercher un opérateur avec tolérance aux accents
+    const findOp=()=>operators.find(o=>{
+      const no=norm(o.name);
+      return nt.includes(no)||no.split('').every((c,i)=>norm(nt)[nt.indexOf(no[0])+i]===c)||
+        operators.some(()=>false)||
+        nt.split(' ').some(word=>word.length>=3&&(no.includes(word)||word.includes(no.substring(0,Math.min(4,no.length)))));
+    });
+
+    // Extraire numéro de commande — avec fallback sur le contexte précédent
+    const numMatch=nt.match(/\b(\d{4,6})\b/);
+    const ctxTask=lastMentionedTaskRef.current; // dernière commande mentionnée
+    const findTask=(num)=>tasks.find(tk=>String(tk.orderNumber)===String(num));
+    // Si numéro trouvé → mémoriser comme contexte
+    if(numMatch){
+      const found=findTask(numMatch[1]);
+      if(found)lastMentionedTaskRef.current=found.id;
+    }
+    // Tâche de contexte = numéro trouvé dans le message OU dernière mémorisée
+    const contextTask=numMatch?findTask(numMatch[1]):(ctxTask?tasks.find(tk=>tk.id===ctxTask):null);
+
+    // 1. ANNULER
+    if(/annul|revien|retour|ctrl.?z|defais|defaire/i.test(nt)){
+      handleUndo();
+      return reply('↩️ Action annulée — planning restauré à l\'état précédent.');
+    }
+
+    // 2. DISPONIBILITÉS
+    if(/disponible|libre|occup|qui.*travail|qui.*a.*rien/i.test(nt)){
+      let checkDate=new Date();
+      if(/lundi/i.test(nt)){checkDate=getStartOfWeek(addDays(new Date(),7));}
+      else if(/mardi/i.test(nt)){checkDate=addDays(getStartOfWeek(addDays(new Date(),7)),1);}
+      else if(/mercredi/i.test(nt)){checkDate=addDays(getStartOfWeek(addDays(new Date(),7)),2);}
+      else if(/jeudi/i.test(nt)){checkDate=addDays(getStartOfWeek(addDays(new Date(),7)),3);}
+      else if(/vendredi/i.test(nt)){checkDate=addDays(getStartOfWeek(addDays(new Date(),7)),4);}
+      else if(/aujourd|maintenant/i.test(nt)){checkDate=new Date();}
+      const dm=nt.match(/(\d{1,2})\s*(jan|fev|mar|avr|mai|juin|juil|aou|sep|oct|nov|dec)/i);
+      if(dm){const mois=['jan','fev','mar','avr','mai','juin','juil','aou','sep','oct','nov','dec'];const mi=mois.findIndex(m=>dm[2].startsWith(m));if(mi>=0){checkDate=new Date(new Date().getFullYear(),mi,parseInt(dm[1]));}}
+      checkDate.setHours(12,0,0,0);
+      const busy=[...new Set(tasks.filter(tk=>{const s=new Date(tk.start);const e=calculateTaskEnd(tk);return s<=checkDate&&e>=checkDate;}).flatMap(tk=>tk.operatorIds||[]))];
+      const free=operators.filter(o=>!busy.includes(o.id)).map(o=>o.name);
+      const busyNames=operators.filter(o=>busy.includes(o.id)).map(o=>o.name);
+      return reply(`📅 ${checkDate.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'})} :\n✅ Disponibles : ${free.join(', ')||'aucun'}\n🔴 Occupés : ${busyNames.join(', ')||'aucun'}`);
+    }
+
+    // 3. DÉPLACER UNE COMMANDE
+    if(/place|deplace|mets|positionne|^met /i.test(nt)){
+      const numMatch=nt.match(/\b(\d{4,6})\b/);
+      // Recherche opérateur tolérante aux accents — mot par mot
+      const opFound=operators.find(o=>{const no=norm(o.name);return nt.split(/\s+/).some(w=>w.length>=3&&(no.startsWith(w)||w.startsWith(no.substring(0,Math.min(w.length,no.length)))));});
+      let targetDate=null;
+      const moisMap=['jan','fev','mar','avr','mai','juin','juil','aou','sep','oct','nov','dec'];
+      const dm2=nt.match(/(\d{1,2})\s*(jan|fev|mar|avr|mai|juin|juil|aou|sep|oct|nov|dec)/i);
+      const dm3=nt.match(/(\d{1,2})[\/\-](\d{1,2})/);
+      if(dm2){const mi=moisMap.findIndex(m=>dm2[2].startsWith(m));if(mi>=0)targetDate=new Date(new Date().getFullYear(),mi,parseInt(dm2[1]));}
+      else if(dm3){targetDate=new Date(new Date().getFullYear(),parseInt(dm3[2])-1,parseInt(dm3[1]));}
+      else if(/lundi/i.test(nt)){targetDate=getStartOfWeek(addDays(new Date(),7));}
+      else if(/mardi/i.test(nt)){targetDate=addDays(getStartOfWeek(addDays(new Date(),7)),1);}
+      else if(/mercredi/i.test(nt)){targetDate=addDays(getStartOfWeek(addDays(new Date(),7)),2);}
+      else if(/jeudi/i.test(nt)){targetDate=addDays(getStartOfWeek(addDays(new Date(),7)),3);}
+      else if(/vendredi/i.test(nt)){targetDate=addDays(getStartOfWeek(addDays(new Date(),7)),4);}
+      else if(/demain/i.test(nt)){targetDate=addDays(new Date(),1);}
+      else if(/aujourd/i.test(nt)){targetDate=new Date();}
+      const hMatch=nt.match(/(\d{1,2})[h:]\s*(\d{0,2})/i);
+      const heure=hMatch?parseInt(hMatch[1]):8;
+      const minute=hMatch&&hMatch[2]?parseInt(hMatch[2]):0;
+
+      if(!numMatch&&!opFound){return reply(`❓ Numéro de commande ou monteur non trouvé.\nEx: "Place la commande 29179 sur Francois le jeudi 2 avril à 8h"`);}
+      const task=contextTask;
+      if(numMatch&&!task){return reply(`❌ Commande "${numMatch[1]}" introuvable.`);}
+      if(!opFound){return reply(`❌ Monteur non reconnu. Équipe : ${operators.map(o=>o.name).join(', ')}`);}
+      if(!targetDate){return reply('❓ Date non reconnue. Ex: "le jeudi 2 avril" ou "le mardi 31"');}
+      targetDate.setHours(heure,minute,0,0);
+      const taskToMove=task||(opFound?tasks.find(tk=>(tk.operatorIds||[]).includes(opFound.id)):null);
+      if(!taskToMove){return reply(`❌ Aucune commande trouvée pour ${opFound?.name||'cet opérateur'}.`);}
+      lastMentionedTaskRef.current=taskToMove.id;
+      handleMoveTask(taskToMove.id,targetDate,opFound.id,taskToMove.operatorIds?.[0]);
+      return reply(`✅ Commande ${taskToMove.orderNumber} (${taskToMove.client}) → ${opFound.name}, ${targetDate.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'})} à ${String(heure).padStart(2,'0')}h${String(minute).padStart(2,'0')}.\n\n↩️ Dites "annule" pour revenir en arrière.`);
+    }
+
+    // 4. CHARGE / RÉSUMÉ
+    if(/charge|resume|bilan|semaine|planning|combien/i.test(nt)){
+      const opFound=operators.find(o=>{const no=norm(o.name);return nt.split(/\s+/).some(w=>w.length>=3&&(no.startsWith(w)||w.startsWith(no.substring(0,Math.min(w.length,no.length)))));});
+      if(opFound){
+        const opTasks=tasks.filter(tk=>(tk.operatorIds||[]).includes(opFound.id)&&tk.status!=='completed');
+        const totalH=opTasks.reduce((s,tk)=>s+getOperatorDuration(tk,opFound.id),0);
+        return reply(`📊 ${opFound.name} : ${opTasks.length} commande(s) — ${totalH.toFixed(1)}h planifiées.\n${opTasks.map(tk=>`• CMD ${tk.orderNumber} (${tk.client}) — ${getOperatorDuration(tk,opFound.id).toFixed(1)}h`).join('\n')}`);
       }
-    }catch(e){setMessages(p=>[...p,{sender:'bot',text:'Erreur de connexion à Gemini. Vérifiez votre clé API.',timestamp:ts}]);}
-    setIsBotLoading(false);
+      const lines=operators.map(o=>{const ot=tasks.filter(tk=>(tk.operatorIds||[]).includes(o.id)&&tk.status!=='completed');const h=ot.reduce((s,tk)=>s+getOperatorDuration(tk,o.id),0);return`• ${o.name} : ${ot.length} cmd, ${h.toFixed(1)}h`;});
+      return reply(`📊 Charge de l'équipe :\n${lines.join('\n')}`);
+    }
+
+    // 5. AIDE
+    if(/aide|help|que.*peux|quoi.*faire/i.test(nt)){
+      return reply('🤖 Commandes disponibles :\n\n📍 "Place la commande 29179 sur Francois le jeudi 2 avril à 8h"\n✏️ "Modifie la commande 29179, temps théorique 15h"\n✏️ "Commande 25456, 5 meubles"\n✏️ "Passe la commande 29179 en terminée"\n✏️ "Commande 29179, temps réel 10h"\n✏️ "Commande 25456 urgent"\n📅 "Qui est disponible lundi ?"\n📊 "Charge de Kamel"\n↩️ "Annule"\n\n🎤 Parlez directement avec le micro !');
+    }
+
+    // 6. MODIFIER UNE COMMANDE
+    if(/modifi|chang|mets|met.*h|update|passe.*termin|passe.*cours|passe.*planif|urgent|normal|meuble|theorique|reel|duree/i.test(nt)||
+       (nt.match(/\b(\d{4,6})\b/)&&!(/place|deplace|positionne/i.test(nt)))){
+      const task=contextTask;
+      if(!task){return reply('❓ Précisez le numéro de commande.\nEx: "Modifie la commande 29179, temps théorique 15h"');}
+
+      // Mémoriser cette commande comme contexte
+      lastMentionedTaskRef.current=task.id;
+
+      const patch={};const changes=[];
+      const durMatch=nt.match(/(?:theorique|duree|temps(?!.*reel))[^\d]*(\d+(?:[.,]\d+)?)\s*h/i)||nt.match(/(\d+(?:[.,]\d+)?)\s*h(?:eures?)?\s*(?:theorique|de\s*montage)/i)||nt.match(/(?:passe|mets|change)[^\d]*(?:le\s+a\s+|a\s+)(\d+(?:[.,]\d+)?)\s*h/i);
+      if(durMatch){patch.duration=parseFloat(durMatch[1].replace(',','.'));changes.push(`durée théorique → ${patch.duration}h`);}
+      const realMatch=nt.match(/(?:reel|reelle|realise)[^\d]*(\d+(?:[.,]\d+)?)\s*h/i)||nt.match(/(\d+(?:[.,]\d+)?)\s*h\s*(?:reel|reelle)/i);
+      if(realMatch){patch.realDuration=parseFloat(realMatch[1].replace(',','.'));changes.push(`durée réelle → ${patch.realDuration}h`);}
+      const meubMatch=nt.match(/(?:meuble|furniture)[^\d]*(\d+)/i)||nt.match(/(\d+)\s*meuble/i);
+      if(meubMatch){patch.furnitureCount=parseInt(meubMatch[1]);changes.push(`nb meubles → ${patch.furnitureCount}`);}
+      if(/termin|complet|fini/i.test(nt)){patch.status='completed';changes.push('statut → Terminée ✅');}
+      else if(/en cours|en\s*prog|commence/i.test(nt)){patch.status='in_progress';changes.push('statut → En cours 🔄');}
+      else if(/planif|attente|prevu/i.test(nt)){patch.status='planned';changes.push('statut → Planifiée 📋');}
+      if(/urgent/i.test(nt)){patch.priority='Urgent';changes.push('priorité → Urgent 🔥');}
+      else if(/normal/i.test(nt)&&/priorit/i.test(nt)){patch.priority='Normal';changes.push('priorité → Normal');}
+
+      if(Object.keys(patch).length===0){
+        // Juste le numéro seul → confirmer le contexte
+        return reply(`📋 Commande ${task.orderNumber} (${task.client}) sélectionnée.\nQue voulez-vous modifier ?\nEx: "temps théorique 15h", "8 meubles", "passe en terminée", "urgent"`);}
+
+      const updated={...task,...patch};
+      handleSaveTask(updated);
+      return reply(`✅ Commande ${task.orderNumber} (${task.client}) modifiée :\n${changes.map(c=>`• ${c}`).join('\n')}\n\n↩️ Dites "annule" pour revenir en arrière.`);
+    }
+
+    // 7. Réponse par défaut
+    reply(`❓ Je n'ai pas compris "${text}".\n\nDites "aide" pour voir ce que je sais faire.`);
   };
 
   return(
@@ -1110,7 +1353,7 @@ const App=()=>{
                       const data=JSON.parse(ev.target.result);
                       if(!data.tasks||!data.operators){alert('❌ Fichier invalide.');return;}
                       if(!window.confirm(`Restaurer la sauvegarde du ${new Date(data.date).toLocaleString('fr-FR')} ?\nCela remplacera toutes les données actuelles.`))return;
-                      setTasks(data.tasks.map(t=>({...t,start:new Date(t.start),operatorStarts:t.operatorStarts||{}})));
+                      setTasks(data.tasks.map(t=>({...t,start:new Date(t.start),operatorStarts:t.operatorStarts||{},operatorIds:t.operatorIds||[],operatorDurations:t.operatorDurations||{}})));
                       setOperators(data.operators);
                       if(data.designFolders)setDesignFolders(data.designFolders);
                       alert('✅ Restauration réussie !');
@@ -1140,25 +1383,17 @@ const App=()=>{
               <button onClick={()=>setIsReadOnly(!isReadOnly)} className="ml-3 text-[8px] px-3 py-1 rounded-lg font-black bg-white text-slate-900 uppercase">{isReadOnly?'DÉVERROUILLER':'VERROUILLER'}</button>
             </div>
           </div>
-          <div className="flex items-center gap-5">
-            <div className="relative"><SearchIcon className="absolute left-4 top-3 h-4 w-4 text-slate-500"/><input type="text" placeholder="Chercher client..." value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} className="bg-slate-950/50 border border-slate-800 rounded-xl py-2.5 pl-12 pr-6 text-xs w-64 outline-none font-bold text-white"/></div>
-            <button onClick={()=>setIsStatsOpen(true)} title="Statistiques & Analyses" style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'3px',padding:'8px 12px',backgroundColor:'rgba(99,102,241,0.15)',border:'1px solid rgba(99,102,241,0.4)',borderRadius:'12px',color:'#818cf8',cursor:'pointer',transition:'all .15s'}} onMouseEnter={e=>{e.currentTarget.style.backgroundColor='rgba(99,102,241,0.3)';e.currentTarget.style.borderColor='#818cf8';e.currentTarget.style.color='white';}} onMouseLeave={e=>{e.currentTarget.style.backgroundColor='rgba(99,102,241,0.15)';e.currentTarget.style.borderColor='rgba(99,102,241,0.4)';e.currentTarget.style.color='#818cf8';}}><ChartBarIcon className="h-5 w-5"/><span style={{fontSize:'8px',fontWeight:900,textTransform:'uppercase',letterSpacing:'0.05em',whiteSpace:'nowrap'}}>STATS</span></button>
-            <button onClick={handleUndo} disabled={history.length===0} title="Annuler la dernière action (Ctrl+Z)" style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'3px',padding:'8px 12px',backgroundColor:history.length>0?'rgba(251,191,36,0.12)':'rgba(30,41,59,0.5)',border:`1px solid ${history.length>0?'rgba(251,191,36,0.4)':'rgba(51,65,85,0.5)'}`,borderRadius:'12px',color:history.length>0?'#fbbf24':'#334155',cursor:history.length>0?'pointer':'not-allowed',transition:'all .15s'}} onMouseEnter={e=>{if(history.length>0){e.currentTarget.style.backgroundColor='rgba(251,191,36,0.25)';e.currentTarget.style.color='white';}}} onMouseLeave={e=>{if(history.length>0){e.currentTarget.style.backgroundColor='rgba(251,191,36,0.12)';e.currentTarget.style.color='#fbbf24';}}}><UndoIcon className="h-5 w-5"/><span style={{fontSize:'8px',fontWeight:900,textTransform:'uppercase',letterSpacing:'0.05em',whiteSpace:'nowrap'}}>ANNULER</span></button>
-            <div className="relative">
-              <button onClick={()=>setShowApiInput(!showApiInput)} className={`p-2.5 border rounded-xl transition-all ${geminiApiKey?'bg-emerald-800/20 border-emerald-700 text-emerald-400':'bg-slate-800/50 border-slate-700 text-slate-400 hover:text-white'}`} title="Configurer Gemini API"><SparklesIcon className="h-5 w-5"/></button>
-              {showApiInput&&(<div className="absolute right-0 top-full mt-2 w-80 bg-[#1e293b] border border-slate-700 rounded-2xl p-4 shadow-2xl z-[1000]">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">CLÉ API GEMINI (PlanifAI)</p>
-                <input type="password" value={geminiApiKey} onChange={e=>setGeminiApiKey(e.target.value)} placeholder="AIzaSy..." className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs text-white outline-none font-mono mb-3"/>
-                <button onClick={()=>setShowApiInput(false)} className="w-full py-2 bg-blue-600 text-white text-[10px] font-black rounded-xl uppercase">Confirmer</button>
-              </div>)}
-            </div>
+          <div className="flex items-center gap-2">
+            <div className="relative"><SearchIcon className="absolute left-3 top-2.5 h-4 w-4 text-slate-500"/><input type="text" placeholder="Chercher..." value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} className="bg-slate-950/50 border border-slate-800 rounded-xl py-2 pl-10 pr-4 text-xs w-40 outline-none font-bold text-white"/></div>
+            <button onClick={()=>setIsStatsOpen(true)} title="Statistiques & Analyses" style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'2px',padding:'6px 10px',backgroundColor:'rgba(99,102,241,0.15)',border:'1px solid rgba(99,102,241,0.4)',borderRadius:'12px',color:'#818cf8',cursor:'pointer',transition:'all .15s'}} onMouseEnter={e=>{e.currentTarget.style.backgroundColor='rgba(99,102,241,0.3)';e.currentTarget.style.color='white';}} onMouseLeave={e=>{e.currentTarget.style.backgroundColor='rgba(99,102,241,0.15)';e.currentTarget.style.color='#818cf8';}}><ChartBarIcon className="h-5 w-5"/><span style={{fontSize:'7px',fontWeight:900,textTransform:'uppercase',whiteSpace:'nowrap'}}>STATS</span></button>
+            <button onClick={handleUndo} disabled={history.length===0} title="Annuler (Ctrl+Z)" style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'2px',padding:'6px 10px',backgroundColor:history.length>0?'rgba(251,191,36,0.12)':'rgba(30,41,59,0.5)',border:`1px solid ${history.length>0?'rgba(251,191,36,0.4)':'rgba(51,65,85,0.5)'}`,borderRadius:'12px',color:history.length>0?'#fbbf24':'#334155',cursor:history.length>0?'pointer':'not-allowed',transition:'all .15s'}} onMouseEnter={e=>{if(history.length>0){e.currentTarget.style.backgroundColor='rgba(251,191,36,0.25)';e.currentTarget.style.color='white';}}} onMouseLeave={e=>{if(history.length>0){e.currentTarget.style.backgroundColor='rgba(251,191,36,0.12)';e.currentTarget.style.color='#fbbf24';}}}><UndoIcon className="h-5 w-5"/><span style={{fontSize:'7px',fontWeight:900,textTransform:'uppercase',whiteSpace:'nowrap'}}>ANNULER</span></button>
+            <button onClick={()=>{userChangedRef.current=true;const aligned=realignAllTasks([...tasks]);setTasks(aligned);const payload={tasks:aligned.map(t=>({...t,start:t.start instanceof Date?t.start.toISOString():t.start})),operators,designFolders,designers,salespeople,savedAt:new Date().toISOString()};fetch(FB_URL,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(()=>setServerStatus('ok')).catch(()=>setServerStatus('offline'));}} title="Réaligner toutes les tâches" style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'2px',padding:'6px 10px',backgroundColor:'rgba(20,184,166,0.15)',border:'1px solid rgba(20,184,166,0.4)',borderRadius:'12px',color:'#2dd4bf',cursor:'pointer',transition:'all .15s'}} onMouseEnter={e=>{e.currentTarget.style.backgroundColor='rgba(20,184,166,0.3)';e.currentTarget.style.color='white';}} onMouseLeave={e=>{e.currentTarget.style.backgroundColor='rgba(20,184,166,0.15)';e.currentTarget.style.color='#2dd4bf';}}><span style={{fontSize:'15px',lineHeight:1}}>🧲</span><span style={{fontSize:'7px',fontWeight:900,textTransform:'uppercase',whiteSpace:'nowrap'}}>AIMANT</span></button>
             <NotificationBell tasks={tasks}/>
-            {/* Indicateur statut serveur */}
-            {serverStatus==='ok'&&<div style={{display:'flex',alignItems:'center',gap:'5px',padding:'4px 10px',backgroundColor:'rgba(34,197,94,.1)',border:'1px solid rgba(34,197,94,.3)',borderRadius:'10px'}} title="Connecté au serveur réseau"><div style={{width:'7px',height:'7px',borderRadius:'50%',backgroundColor:'#22c55e',boxShadow:'0 0 6px #22c55e'}}></div><span style={{fontSize:'9px',fontWeight:900,color:'#4ade80',textTransform:'uppercase'}}>RÉSEAU</span></div>}
-            {serverStatus==='offline'&&<div style={{display:'flex',alignItems:'center',gap:'5px',padding:'4px 10px',backgroundColor:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.3)',borderRadius:'10px'}} title="Serveur non disponible - mode local"><div style={{width:'7px',height:'7px',borderRadius:'50%',backgroundColor:'#ef4444'}}></div><span style={{fontSize:'9px',fontWeight:900,color:'#f87171',textTransform:'uppercase'}}>HORS LIGNE</span></div>}
-            {serverStatus==='local'&&<div style={{display:'flex',alignItems:'center',gap:'5px',padding:'4px 10px',backgroundColor:'rgba(99,102,241,.1)',border:'1px solid rgba(99,102,241,.3)',borderRadius:'10px'}} title="Mode fichier local"><div style={{width:'7px',height:'7px',borderRadius:'50%',backgroundColor:'#818cf8'}}></div><span style={{fontSize:'9px',fontWeight:900,color:'#a5b4fc',textTransform:'uppercase'}}>LOCAL</span></div>}
-            <button onClick={handleSave} disabled={saveStatus!=='idle'} className={`px-8 py-2.5 rounded-xl font-black text-[10px] uppercase shadow-lg transition-all flex items-center gap-2 ${saveStatus==='success'?'bg-green-500 text-white':saveStatus==='saving'?'bg-emerald-700 text-white/70 cursor-wait':'bg-emerald-600 text-white hover:bg-emerald-500 active:scale-95'}`}>
-              {saveStatus==='saving'?'ENREGISTREMENT...':(saveStatus==='success'?<><CheckCircleIcon className="h-4 w-4"/> SAUVEGARDÉ !</>:<><SaveIcon className="h-4 w-4"/> ENREGISTRER</>)}
+            {serverStatus==='ok'&&<div style={{display:'flex',alignItems:'center',gap:'4px',padding:'3px 8px',backgroundColor:'rgba(34,197,94,.1)',border:'1px solid rgba(34,197,94,.3)',borderRadius:'10px'}}><div style={{width:'6px',height:'6px',borderRadius:'50%',backgroundColor:'#22c55e'}}></div><span style={{fontSize:'8px',fontWeight:900,color:'#4ade80',textTransform:'uppercase'}}>RÉSEAU</span></div>}
+            {serverStatus==='offline'&&<div style={{display:'flex',alignItems:'center',gap:'4px',padding:'3px 8px',backgroundColor:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.3)',borderRadius:'10px'}}><div style={{width:'6px',height:'6px',borderRadius:'50%',backgroundColor:'#ef4444'}}></div><span style={{fontSize:'8px',fontWeight:900,color:'#f87171',textTransform:'uppercase'}}>OFFLINE</span></div>}
+            {serverStatus==='local'&&<div style={{display:'flex',alignItems:'center',gap:'4px',padding:'3px 8px',backgroundColor:'rgba(99,102,241,.1)',border:'1px solid rgba(99,102,241,.3)',borderRadius:'10px'}}><div style={{width:'6px',height:'6px',borderRadius:'50%',backgroundColor:'#818cf8'}}></div><span style={{fontSize:'8px',fontWeight:900,color:'#a5b4fc',textTransform:'uppercase'}}>LOCAL</span></div>}
+            <button onClick={handleSave} disabled={saveStatus!=='idle'} className={`px-5 py-2 rounded-xl font-black text-[10px] uppercase shadow-lg transition-all flex items-center gap-2 flex-shrink-0 ${saveStatus==='success'?'bg-green-500 text-white':saveStatus==='saving'?'bg-emerald-700 text-white/70 cursor-wait':'bg-emerald-600 text-white hover:bg-emerald-500 active:scale-95'}`}>
+              {saveStatus==='saving'?'...':(saveStatus==='success'?<><CheckCircleIcon className="h-4 w-4"/>OK</>:<><SaveIcon className="h-4 w-4"/>ENREGISTRER</>)}
             </button>
           </div>
         </header>
@@ -1168,7 +1403,7 @@ const App=()=>{
             onMoveTask={handleMoveTask} movingTaskId={movingTaskId} setMovingTaskId={setMovingTaskId}/>
         </div>
       </main>
-      <TaskModal isOpen={isModalOpen} onClose={()=>{setIsModalOpen(false);setEditingTask(null);}} operators={operators} tasks={tasks} taskToEdit={editingTask} onSaveTask={handleSaveTask} designers={designers} setDesigners={setDesigners} salespeople={salespeople} setSalespeople={setSalespeople}/>
+      <TaskModal isOpen={isModalOpen} onClose={()=>{setIsModalOpen(false);setEditingTask(null);}} operators={operators} tasks={tasks} taskToEdit={editingTask} onSaveTask={handleSaveTask} onDelete={handleDeleteTask} designers={designers} setDesigners={setDesigners} salespeople={salespeople} setSalespeople={setSalespeople}/>
       <DesignModal isOpen={isDesignModalOpen} onClose={()=>setIsDesignModalOpen(false)} folders={designFolders} onSave={(f)=>setDesignFolders(prev=>{const i=prev.findIndex(x=>x.id===f.id);if(i!==-1){const u=[...prev];u[i]=f;return u;}return[...prev,f];})} onDelete={(id)=>setDesignFolders(p=>p.filter(x=>x.id!==id))}/>
       <DashboardModal isOpen={isStatsOpen} onClose={()=>setIsStatsOpen(false)} tasks={tasks} operators={operators} onUpdateTask={(taskId,patch)=>setTasks(prev=>prev.map(t=>t.id===taskId?{...t,...patch}:t))}/>
       <Chatbot messages={messages} onSendMessage={handleSendMessage} onRestoreChat={()=>setMessages([{sender:'bot',text:'Interface TRILOGIQ restaurée. Le flux de production est prêt.',timestamp:new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}])} isBotLoading={isBotLoading}/>
@@ -1176,8 +1411,60 @@ const App=()=>{
   );
 };
 
+// === PROTECTION PAR MOT DE PASSE ===
+const APP_PASSWORD = 'Trilogiq2026'; // <-- Changez ce mot de passe ici
+
+const LoginScreen = ({onLogin}) => {
+  const [pwd, setPwd] = useState('');
+  const [error, setError] = useState(false);
+  const [shake, setShake] = useState(false);
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (pwd === APP_PASSWORD) {
+      sessionStorage.setItem('trilogiq_auth','1');
+      onLogin();
+    } else {
+      setError(true);
+      setShake(true);
+      setTimeout(()=>setShake(false),500);
+      setPwd('');
+    }
+  };
+  return (
+    <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',background:'#0f172a'}}>
+      <div style={{background:'#1e293b',borderRadius:'16px',padding:'40px',width:'340px',boxShadow:'0 25px 50px rgba(0,0,0,0.5)',border:'1px solid #334155'}}>
+        <div style={{textAlign:'center',marginBottom:'32px'}}>
+          <div style={{fontSize:'40px',marginBottom:'8px'}}>🔒</div>
+          <h1 style={{color:'white',fontSize:'22px',fontWeight:800,margin:0}}>TRILOGIQ</h1>
+          <p style={{color:'#64748b',fontSize:'13px',margin:'6px 0 0'}}>Planning Montage 2026</p>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <input
+            autoFocus
+            type="password"
+            value={pwd}
+            onChange={e=>{setPwd(e.target.value);setError(false);}}
+            placeholder="Mot de passe"
+            style={{width:'100%',boxSizing:'border-box',padding:'12px 16px',background:'#0f172a',border:`1px solid ${error?'#ef4444':'#334155'}`,borderRadius:'8px',color:'white',fontSize:'15px',outline:'none',animation:shake?'shake 0.4s ease':'none'}}
+          />
+          {error && <p style={{color:'#ef4444',fontSize:'12px',margin:'6px 0 0'}}>Mot de passe incorrect ❌</p>}
+          <button type="submit" style={{width:'100%',marginTop:'16px',padding:'12px',background:'#6366f1',border:'none',borderRadius:'8px',color:'white',fontSize:'15px',fontWeight:700,cursor:'pointer'}}>
+            Accéder →
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+const ProtectedApp = () => {
+  const [auth, setAuth] = useState(!!sessionStorage.getItem('trilogiq_auth'));
+  if (!auth) return <LoginScreen onLogin={()=>setAuth(true)} />;
+  return <App />;
+};
+
 const root=ReactDOM.createRoot(document.getElementById('root'));
-root.render(<App/>);
+root.render(<ProtectedApp/>);
 </script>
 </body>
 </html>
